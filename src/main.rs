@@ -268,7 +268,10 @@ fn main() -> ExitCode {
                 println!(
                     "{YELLOW}+------------------------------------------------------------------------+{RESET}"
                 );
-                print!("\n  Deseja realmente apagar esta sessao e seus arquivos? (s/N): ");
+                println!("\n  Opcoes disponiveis:");
+                println!("    {GREEN}[1] Cancelar e manter sessao (Padrao / Enter){RESET}");
+                println!("    {RED}[2] Confirmar exclusao definitiva dos arquivos{RESET}");
+                print!("\n  Digite sua escolha [1 para cancelar, 2 para apagar]: ");
                 use std::io::Write;
                 let _ = std::io::stdout().flush();
 
@@ -279,8 +282,16 @@ fn main() -> ExitCode {
                 }
 
                 let answer = input.trim().to_lowercase();
-                if answer != "s" && answer != "sim" && answer != "y" && answer != "yes" {
-                    println!("{YELLOW}[i] Exclusao cancelada pelo usuario.{RESET}");
+                if answer != "2"
+                    && answer != "s"
+                    && answer != "sim"
+                    && answer != "y"
+                    && answer != "yes"
+                    && answer != "apagar"
+                {
+                    println!(
+                        "{YELLOW}[i] Exclusao cancelada pelo usuario (sessao mantida).{RESET}"
+                    );
                     return ExitCode::SUCCESS;
                 }
             }
