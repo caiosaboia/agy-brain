@@ -1,6 +1,6 @@
 use crate::core::{ArtifactInfo, BrainStats, SessionSummary};
 use chrono::{DateTime, Utc};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub const RESET: &str = "\x1b[0m";
@@ -299,50 +299,75 @@ pub fn open_in_editor(target_path: &Path) -> bool {
     }
 }
 
+pub fn resolve_neovim_binary() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("NVIM_PATH") {
+        let pb = PathBuf::from(p);
+        if pb.is_file() {
+            return Some(pb);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        for candidate in ["nvim.exe", "nvim", "vim.exe", "vim"] {
+            if let Ok(out) = Command::new("where").arg(candidate).output() {
+                if out.status.success() {
+                    let text = String::from_utf8_lossy(&out.stdout);
+                    if let Some(first_line) = text.lines().next() {
+                        let path = PathBuf::from(first_line.trim());
+                        if path.is_file() {
+                            return Some(path);
+                        }
+                    }
+                }
+            }
+        }
+        for loc in [
+            r"C:\Program Files\Neovim\bin\nvim.exe",
+            r"C:\Program Files (x86)\Neovim\bin\nvim.exe",
+            r"C:\tools\neovim\bin\nvim.exe",
+        ] {
+            let pb = PathBuf::from(loc);
+            if pb.is_file() {
+                return Some(pb);
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        for candidate in ["nvim", "vim"] {
+            if let Ok(out) = Command::new("which").arg(candidate).output() {
+                if out.status.success() {
+                    let text = String::from_utf8_lossy(&out.stdout);
+                    if let Some(first_line) = text.lines().next() {
+                        let path = PathBuf::from(first_line.trim());
+                        if path.is_file() {
+                            return Some(path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
 pub fn open_in_neovim(target_path: &Path) -> bool {
     if !target_path.exists() {
         return false;
     }
 
-    let mut candidate = "nvim";
-    #[cfg(target_os = "windows")]
-    {
-        if Command::new("where")
-            .arg("nvim")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-        {
-            candidate = "nvim";
-        } else if Command::new("where")
-            .arg("vim")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-        {
-            candidate = "vim";
+    let nvim_bin = match resolve_neovim_binary() {
+        Some(b) => b,
+        None => {
+            eprintln!("[!] Neovim not found. Falling back to default editor.");
+            return open_in_editor(target_path);
         }
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        if Command::new("which")
-            .arg("nvim")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-        {
-            candidate = "nvim";
-        } else if Command::new("which")
-            .arg("vim")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-        {
-            candidate = "vim";
-        }
-    }
+    };
 
-    let status = Command::new(candidate)
+    let status = Command::new(&nvim_bin)
         .arg(".")
         .current_dir(target_path)
         .stdin(std::process::Stdio::inherit())
@@ -353,7 +378,11 @@ pub fn open_in_neovim(target_path: &Path) -> bool {
     match status {
         Ok(s) => s.success(),
         Err(e) => {
-            eprintln!("[!] Failed to execute Neovim: {}", e);
+            eprintln!(
+                "[!] Failed to execute Neovim ({}): {}",
+                nvim_bin.display(),
+                e
+            );
             false
         }
     }

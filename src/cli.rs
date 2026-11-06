@@ -16,6 +16,13 @@ pub struct Cli {
     )]
     pub app_dir: Option<PathBuf>,
 
+    #[arg(
+        long,
+        global = true,
+        help = "Write selected target directory to file upon exit"
+    )]
+    pub target_file: Option<PathBuf>,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }

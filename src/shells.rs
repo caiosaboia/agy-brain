@@ -19,12 +19,19 @@ agy-brain() {
       return 0
     fi
   elif [ "$#" -eq 0 ]; then
-    local target
-    target="$(command agy-brain)"
-    if [ -n "$target" ] && [ -d "$target" ]; then
-      cd "$target" || return
-      return 0
+    local tmp
+    tmp="$(mktemp 2>/dev/null || mktemp -t agy_brain)"
+    command agy-brain --target-file "$tmp"
+    if [ -s "$tmp" ]; then
+      local target
+      target="$(cat "$tmp")"
+      rm -f "$tmp"
+      if [ -n "$target" ] && [ -d "$target" ]; then
+        cd "$target" || return
+        return 0
+      fi
     fi
+    rm -f "$tmp"
     return 0
   fi
   command agy-brain "$@"
@@ -51,12 +58,19 @@ agy-brain() {
       return 0
     fi
   elif [ "$#" -eq 0 ]; then
-    local target
-    target="$(command agy-brain)"
-    if [ -n "$target" ] && [ -d "$target" ]; then
-      cd "$target" || return
-      return 0
+    local tmp
+    tmp="$(mktemp 2>/dev/null || mktemp -t agy_brain)"
+    command agy-brain --target-file "$tmp"
+    if [ -s "$tmp" ]; then
+      local target
+      target="$(cat "$tmp")"
+      rm -f "$tmp"
+      if [ -n "$target" ] && [ -d "$target" ]; then
+        cd "$target" || return
+        return 0
+      fi
     fi
+    rm -f "$tmp"
     return 0
   fi
   command agy-brain "$@"
@@ -80,11 +94,17 @@ function agy-brain --description "Antigravity Brain CLI Navigator"
             return 0
         end
     else if test (count $argv) -eq 0
-        set -l target (command agy-brain)
-        if test -n "$target" -a -d "$target"
-            cd "$target"
-            return 0
+        set -l tmp (mktemp 2>/dev/null; or mktemp -t agy_brain)
+        command agy-brain --target-file "$tmp"
+        if test -s "$tmp"
+            set -l target (cat "$tmp")
+            rm -f "$tmp"
+            if test -n "$target" -a -d "$target"
+                cd "$target"
+                return 0
+            end
         end
+        rm -f "$tmp"
         return 0
     end
     command agy-brain $argv
@@ -128,11 +148,20 @@ function agy-brain {
     }
 
     if (-not $sub) {
-        $target = (& $exe)
-        if ($target -and (Test-Path $target)) {
-            Set-Location $target
-            Write-Host "[OK] Cerebro Antigravity ($target)" -ForegroundColor Green
-            return
+        $tmp = [System.IO.Path]::GetTempFileName()
+        try {
+            & $exe --target-file $tmp
+            if (Test-Path $tmp) {
+                $target = (Get-Content -Path $tmp -Raw -ErrorAction SilentlyContinue)
+                if ($target) { $target = $target.Trim() }
+                if ($target -and (Test-Path $target)) {
+                    Set-Location $target
+                    Write-Host "[OK] Cerebro Antigravity ($target)" -ForegroundColor Green
+                    return
+                }
+            }
+        } finally {
+            Remove-Item -Path $tmp -Force -ErrorAction SilentlyContinue
         }
         return
     }
