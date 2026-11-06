@@ -1,62 +1,73 @@
 # agy-brain
 
 [![CI](https://github.com/caiosaboia/agy-brain/actions/workflows/ci.yml/badge.svg)](https://github.com/caiosaboia/agy-brain/actions/workflows/ci.yml)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![Rust 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Zero Dependencies](https://img.shields.io/badge/dependencies-0%20external-brightgreen.svg)](https://github.com/caiosaboia/agy-brain)
+[![Pure Rust](https://img.shields.io/badge/Pure%20Rust-100%25-blue.svg)](https://github.com/caiosaboia/agy-brain)
+[![Zero External Dependencies](https://img.shields.io/badge/dependencies-0%20runtime-brightgreen.svg)](https://github.com/caiosaboia/agy-brain)
 
-**agy-brain** is an ultra-fast, cross-platform CLI navigator and session inspector for **Antigravity CLI**. It allows you to jump directly to any workspace brain, inspect generated artifacts, preview session statistics in a rich terminal UI, and manage pins across Windows, macOS, and Linux.
+**agy-brain** is a blazing-fast, standalone CLI navigator and session inspector for **Antigravity CLI**, written 100% in Pure Rust. It allows developers to instantly jump to workspace brain directories, inspect generated artifacts and plan files, explore sessions via an embedded terminal user interface (TUI), and manage session pins across Windows, macOS, and Linux.
 
 ---
 
 ## Highlights
 
-* **Zero External Dependencies:** Built 100% on Python standard library with native ANSI color styling. Instant installation and sub-millisecond execution.
-* **Interactive TUI Dashboard:** Seamless integration with `fzf` featuring a live 62% side preview panel showing session metrics, step counts, and generated artifacts.
-* **Smart Auto-Discovery:** Discovers the Antigravity database and brain directories automatically across OS-specific paths, environment variables (`$AGY_APP_DIR`), or custom locations.
-* **Pinning System:** Pin primary sessions per workspace using local `.brain` files (tracked or untracked) or the global pin registry.
-* **Universal Shell Integration:** Native `cd` support across **Bash**, **Zsh**, **Fish**, and **PowerShell**.
-* **Cross-Platform Launchers:** Open brains in your operating system's native file manager (`explorer.exe`, `open`, `xdg-open`) or preferred editor (`$EDITOR`, `nvim`, `code`, `nano`).
+* **100% Pure Rust & Single Binary:** Zero external runtime dependencies. No Python, Node, or system SQLite library needed (bundled C SQLite included).
+* **Embedded Interactive TUI:** Built-in dashboard powered by `ratatui` and `crossterm` with instant fuzzy search, side-by-side session inspection, live metrics, and keyboard shortcuts.
+* **Smart Auto-Discovery:** Seamlessly discovers Antigravity database files and brain directories across platform-specific locations or custom `$AGY_APP_DIR` paths.
+* **Workspace Pinning:** Pin primary sessions per workspace using local `.brain` files or the global pin registry (`workspace_pins.json`).
+* **Universal Shell Integration:** Native `cd` navigation support across **PowerShell**, **Bash**, **Zsh**, and **Fish**.
+* **Native Desktop Integration:** Open sessions in your platform's default file manager (`explorer.exe`, `open`, `xdg-open`) or preferred editor (`$EDITOR`, `code`, `nvim`, `nano`).
 
 ---
 
-## Installation
+## Quick Installation
 
-### Via `uv` (Recommended)
-```bash
-uv tool install agy-brain
+### Windows (PowerShell)
+Run in PowerShell:
+```powershell
+irm https://raw.githubusercontent.com/caiosaboia/agy-brain/main/install.ps1 | iex
 ```
 
-### Via `pipx`
+### Linux & macOS (Bash / Zsh)
+Run in your terminal:
 ```bash
-pipx install agy-brain
+curl -fsSL https://raw.githubusercontent.com/caiosaboia/agy-brain/main/install.sh | bash
 ```
 
-### Via `pip`
+### Via Cargo
+If you have the Rust toolchain installed:
 ```bash
-pip install agy-brain
+cargo install --git https://github.com/caiosaboia/agy-brain.git
 ```
 
-### From Source
-```bash
-git clone https://github.com/caiosaboia/agy-brain.git
-cd agy-brain
-pip install -e .
-```
+### Manual Download
+Download the pre-compiled binary for your architecture from [GitHub Releases](https://github.com/caiosaboia/agy-brain/releases):
+* **Windows (x86_64):** `agy-brain-x86_64-pc-windows-msvc.zip`
+* **Linux (x86_64):** `agy-brain-x86_64-unknown-linux-gnu.tar.gz`
+* **macOS (Apple Silicon / aarch64):** `agy-brain-aarch64-apple-darwin.tar.gz`
+* **macOS (Intel / x86_64):** `agy-brain-x86_64-apple-darwin.tar.gz`
+
+Extract the binary and place it in your `$PATH`.
 
 ---
 
-## Shell Setup (Automatic Navigation)
+## Shell Setup (Directory Navigation)
 
-To enable directory jumping (`cd`) directly to brain folders, initialize `agy-brain` in your shell.
+To enable automatic directory jumping (`cd`) directly to session brain folders, configure the shell integration hook.
 
-### Automatic One-Line Setup
+### Automatic Configuration
 ```bash
 agy-brain install
 ```
-*Detects your active shell (Bash, Zsh, Fish, or PowerShell) and adds the initialization hook to your profile.*
+*Detects your active shell (PowerShell, Bash, Zsh, or Fish) and appends the hook idempotently to your profile.*
 
-### Manual Setup
+### Manual Configuration
+
+* **PowerShell (`$PROFILE`):**
+  ```powershell
+  Invoke-Expression (& agy-brain init powershell | Out-String)
+  ```
 
 * **Bash (`~/.bashrc`):**
   ```bash
@@ -73,29 +84,29 @@ agy-brain install
   agy-brain init fish | source
   ```
 
-* **PowerShell (`$PROFILE`):**
-  ```powershell
-  Invoke-Expression (& agy-brain init powershell | Out-String)
-  ```
+After reloading your shell, you can use either `brain` or `cd-brain`.
 
 ---
 
 ## Usage
 
 ### 1. Interactive TUI Mode
-Run without arguments to launch the fuzzy finder with live preview:
+Run without arguments to launch the embedded TUI dashboard:
 ```bash
-agy-brain
-# or alias:
-cd-brain
+brain
+# or
+agy-brain tui
 ```
 
-**Keyboard Shortcuts in `fzf`:**
+**Keyboard Shortcuts in TUI:**
+* `Up` / `Down` or `j` / `k`: Navigate session list.
+* `Type any query`: Instant fuzzy filter across UUID, title, status, and path.
 * `Enter`: Jump (`cd`) into the selected brain directory.
-* `Ctrl + O`: Open the brain directory in your OS file manager.
-* `Ctrl + P`: Pin the selected session to the current workspace.
-* `Ctrl + E`: Open the brain folder in your default code editor (`nvim`, `code`, etc.).
+* `Ctrl + O`: Open the brain directory in OS file manager.
+* `Ctrl + P`: Pin or unpin the selected session for the current workspace.
+* `Ctrl + E`: Open the brain folder in your default code editor.
 * `Ctrl + A`: Toggle between sessions of the current workspace and all global sessions.
+* `Esc`: Exit dashboard.
 
 ---
 
@@ -103,41 +114,43 @@ cd-brain
 
 * **Navigate directly (`cd`):**
   ```bash
-  # Go to primary/pinned brain of current workspace:
-  agy-brain go
+  # Jump to primary/pinned session for the current workspace:
+  brain go
 
-  # Go to specific index or UUID:
-  agy-brain go 0
-  agy-brain go f6e483f5-5c92-49a2-a3cb-7597a280aa13
+  # Jump to session by index (from 'list') or UUID:
+  brain go 0
+  brain go f6e483f5-5c92-49a2-a3cb-7597a280aa13
   ```
 
 * **List sessions:**
   ```bash
-  # List sessions for current project:
+  # List sessions belonging to current project:
   agy-brain list
 
-  # List all sessions across the whole machine:
+  # List all sessions across the machine:
   agy-brain list --all
   ```
 
-* **Inspect session info & metrics:**
+* **Inspect session details:**
   ```bash
   agy-brain info
-  agy-brain info 1
+  agy-brain info 0
+  agy-brain info <UUID>
   ```
 
-* **List generated artifacts:**
+* **Inspect generated artifacts:**
   ```bash
+  # View plans, markdown files, logs, and scratch scripts:
   agy-brain artifacts
   ```
 
 * **Pin / Unpin workspace session:**
   ```bash
-  # Pin current or specific brain:
+  # Pin current or specified session to the workspace:
   agy-brain pin
   agy-brain pin f6e483f5-5c92-49a2-a3cb-7597a280aa13
 
-  # Remove pin:
+  # Remove workspace pin:
   agy-brain unpin
   ```
 
@@ -151,7 +164,7 @@ cd-brain
   agy-brain edit
   ```
 
-* **Run Diagnostics:**
+* **Run Health Diagnostics:**
   ```bash
   agy-brain doctor
   ```
@@ -162,33 +175,39 @@ cd-brain
 
 | Command | Alias | Description |
 |---|---|---|
-| `agy-brain` | `cd-brain` | Interactive `fzf` dashboard with live preview |
-| `agy-brain go [target]` | | Navigate directly to the resolved brain folder |
+| `brain` / `cd-brain` | | Interactive Ratatui TUI dashboard with live preview |
+| `agy-brain go [target]` | | Navigate directly into the resolved brain directory |
 | `agy-brain list [-a]` | `ls` | Display sessions table with status, steps, and dates |
-| `agy-brain info [target]` | `show` | Render session card with detailed stats |
-| `agy-brain artifacts [target]` | `art` | List `.md` plans, `.png` screenshots, and scratch scripts |
-| `agy-brain open [target]` | | Open brain folder in Explorer / Finder / xdg-open |
-| `agy-brain edit [target]` | | Open brain folder in code editor (`nvim`, `code`, etc.) |
-| `agy-brain pin [id]` | | Pin session as primary for current workspace |
+| `agy-brain info [target]` | `show` | Render session card with detailed statistics |
+| `agy-brain artifacts [target]` | `art` | List `.md` plans, screenshots, and scratch files |
+| `agy-brain open [target]` | | Open session directory in Explorer / Finder / xdg-open |
+| `agy-brain edit [target]` | | Open session directory in code editor |
+| `agy-brain pin [id]` | | Pin session as primary for the current workspace |
 | `agy-brain unpin` | | Remove pin from current workspace |
-| `agy-brain doctor` | | Check Antigravity paths, SQLite DB health, and tools |
-| `agy-brain init <shell>` | | Generate shell integration hook (`bash`, `zsh`, `fish`, `pwsh`) |
-| `agy-brain install` | | Automatically configure active shell profile |
+| `agy-brain doctor` | | Validate Antigravity DB paths and environment health |
+| `agy-brain init <shell>` | | Output shell integration function script |
+| `agy-brain install [shell]`| | Automatically append hook to user's shell profile |
 
 ---
 
-## Development & Testing
+## Building from Source
 
 ```bash
-# Install development dependencies
-uv pip install -e ".[dev]"
+# Clone the repository
+git clone https://github.com/caiosaboia/agy-brain.git
+cd agy-brain
 
 # Run tests
-pytest -v
+cargo test
 
 # Run linter
-ruff check .
+cargo clippy --all-targets -- -D warnings
+
+# Build optimized release binary
+cargo build --release
 ```
+
+The compiled binary will be located at `target/release/agy-brain` (or `agy-brain.exe` on Windows).
 
 ---
 

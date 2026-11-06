@@ -1,0 +1,32 @@
+[package]
+name = "agy-brain"
+version = "0.2.0"
+edition = "2021"
+authors = ["Caio Saboia"]
+description = "Universal, standalone cross-platform CLI navigator and session inspector for Antigravity Brains"
+license = "MIT"
+repository = "https://github.com/caiosaboia/agy-brain"
+keywords = ["antigravity", "cli", "tui", "terminal", "productivity"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+clap = { version = "4.5", features = ["derive", "cargo"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dirs = "5.0"
+walkdir = "2.5"
+ratatui = "0.29"
+crossterm = "0.28"
+fuzzy-matcher = "0.3"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+[dev-dependencies]
+tempfile = "3.14"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
