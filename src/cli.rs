@@ -58,6 +58,16 @@ pub enum Commands {
         target: Option<String>,
     },
 
+    #[command(
+        name = "nvim",
+        aliases = ["vim", "v"],
+        about = "Open brain directory directly in Neovim"
+    )]
+    Nvim {
+        #[arg(help = "Brain index or UUID")]
+        target: Option<String>,
+    },
+
     #[command(about = "Pin brain session to current workspace")]
     Pin {
         #[arg(help = "Brain index or UUID")]

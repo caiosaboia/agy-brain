@@ -103,6 +103,7 @@ agy-brain tui
 * `Type any query`: Instant fuzzy filter across UUID, title, status, and path.
 * `Enter`: Jump (`cd`) into the selected brain directory.
 * `Ctrl + O`: Open the brain directory in OS file manager.
+* `Ctrl + V` / `Ctrl + N`: Open session directly in Neovim (suspends TUI, returns upon exit).
 * `Ctrl + P`: Pin or unpin the selected session for the current workspace.
 * `Ctrl + D`: Delete selected session (prompts modal confirmation).
 * `Ctrl + E`: Open the brain folder in your default code editor.
@@ -168,6 +169,19 @@ agy-brain tui
   agy-brain delete 3 --force
   ```
 
+* **Open in Neovim:**
+  ```bash
+  # Open current workspace session in Neovim:
+  brain nvim
+
+  # Open by index or UUID:
+  brain nvim 0
+  brain nvim 706a4ef8-9dc7-49b4-93bc-3d4a716f2b84
+
+  # Using shorthand alias:
+  brain v
+  ```
+
 * **Open in File Manager:**
   ```bash
   agy-brain open
@@ -195,6 +209,7 @@ agy-brain tui
 | `agy-brain info [target]` | `show` | Render session card with detailed statistics |
 | `agy-brain artifacts [target]` | `art` | List `.md` plans, screenshots, and scratch files |
 | `agy-brain open [target]` | | Open session directory in Explorer / Finder / xdg-open |
+| `agy-brain nvim [target]` | `vim`, `v` | Open session directory directly in Neovim |
 | `agy-brain edit [target]` | | Open session directory in code editor |
 | `agy-brain pin [id]` | | Pin session as primary for the current workspace |
 | `agy-brain unpin` | | Remove pin from current workspace |

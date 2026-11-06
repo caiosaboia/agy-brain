@@ -1,7 +1,7 @@
 use crate::core::{
     delete_session, get_brain_root, get_brain_stats, set_pin, BrainStats, SessionSummary,
 };
-use crate::ui::{open_in_editor, open_in_file_manager};
+use crate::ui::{open_in_editor, open_in_file_manager, open_in_neovim};
 use chrono::{DateTime, Utc};
 use crossterm::{
     event::{
@@ -312,10 +312,38 @@ fn main_loop<B: ratatui::backend::Backend>(
                         state.delete_modal_focus = DeleteModalFocus::Cancel;
                     }
                 }
+                (KeyModifiers::CONTROL, KeyCode::Char('v') | KeyCode::Char('n')) => {
+                    if let Some(session) = state.selected_session() {
+                        let brain_path = get_brain_root(state.app_dir.as_deref()).join(&session.id);
+                        let _ = disable_raw_mode();
+                        let _ =
+                            execute!(std::io::stderr(), LeaveAlternateScreen, DisableMouseCapture);
+                        let _ = terminal.show_cursor();
+
+                        let _ = open_in_neovim(&brain_path);
+
+                        let _ = enable_raw_mode();
+                        let _ =
+                            execute!(std::io::stderr(), EnterAlternateScreen, EnableMouseCapture);
+                        let _ = terminal.hide_cursor();
+                        let _ = terminal.clear();
+                    }
+                }
                 (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
                     if let Some(session) = state.selected_session() {
                         let brain_path = get_brain_root(state.app_dir.as_deref()).join(&session.id);
-                        open_in_editor(&brain_path);
+                        let _ = disable_raw_mode();
+                        let _ =
+                            execute!(std::io::stderr(), LeaveAlternateScreen, DisableMouseCapture);
+                        let _ = terminal.show_cursor();
+
+                        let _ = open_in_editor(&brain_path);
+
+                        let _ = enable_raw_mode();
+                        let _ =
+                            execute!(std::io::stderr(), EnterAlternateScreen, EnableMouseCapture);
+                        let _ = terminal.hide_cursor();
+                        let _ = terminal.clear();
                     }
                 }
                 (KeyModifiers::CONTROL, KeyCode::Char('a')) => {
@@ -461,6 +489,14 @@ fn ui(f: &mut Frame, state: &mut AppState) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" Navegar  "),
+        Span::styled(
+            " [Ctrl+V] ",
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Rgb(80, 220, 140))
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" Neovim  "),
         Span::styled(
             " [Ctrl+O] ",
             Style::default()
