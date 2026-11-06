@@ -104,6 +104,9 @@ fn main() -> ExitCode {
 
             match run_interactive_tui(sessions, &cur_ws, app_dir) {
                 Ok(TuiAction::Navigate(path)) => {
+                    if let Some(tf) = &args.target_file {
+                        let _ = std::fs::write(tf, path.to_string_lossy().as_bytes());
+                    }
                     println!("{}", path.display());
                     ExitCode::SUCCESS
                 }
