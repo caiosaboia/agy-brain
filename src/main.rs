@@ -1,0 +1,268 @@
+mod cli;
+mod core;
+mod shells;
+mod tui;
+mod ui;
+
+use clap::Parser;
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+
+use cli::{Cli, Commands};
+use core::{
+    fetch_sessions, get_brain_root, get_brain_stats, get_db_path, get_default_app_dir,
+    get_pinned_id_for_workspace, remove_pin, resolve_brain_target, set_pin,
+};
+use shells::{get_shell_integration, install_shell_integration};
+use tui::{run_interactive_tui, TuiAction};
+use ui::{
+    list_artifacts, open_in_editor, open_in_file_manager, render_preview, render_table, CYAN,
+    GREEN, RED, RESET, WHITE, YELLOW,
+};
+
+fn run_doctor(app_dir: Option<&Path>) {
+    let target_app = app_dir
+        .map(PathBuf::from)
+        .unwrap_or_else(get_default_app_dir);
+    let db_file = get_db_path(Some(&target_app));
+    let brain_dir = get_brain_root(Some(&target_app));
+
+    println!(
+        "\n{CYAN}+------------------------------------------------------------------------+{RESET}"
+    );
+    println!(
+        "{CYAN}| AGY-BRAIN DOCTOR - DIAGNOSTICO DO SISTEMA (RUST STANDALONE)           |{RESET}"
+    );
+    println!(
+        "{CYAN}+------------------------------------------------------------------------+{RESET}\n"
+    );
+
+    if target_app.is_dir() {
+        println!(
+            "  {GREEN}[OK]{RESET} Diretorio Antigravity: {}",
+            target_app.display()
+        );
+    } else {
+        println!(
+            "  {RED}[X]{RESET}  Diretorio Antigravity nao encontrado: {}",
+            target_app.display()
+        );
+    }
+
+    if db_file.is_file() {
+        println!(
+            "  {GREEN}[OK]{RESET} Banco de dados SQLite: {}",
+            db_file.display()
+        );
+        let sessions = fetch_sessions(None, true, Some(&target_app), None);
+        println!(
+            "  {GREEN}[OK]{RESET} Total de sessoes registradas: {}",
+            sessions.len()
+        );
+    } else {
+        println!(
+            "  {RED}[X]{RESET}  Banco SQLite nao encontrado em: {}",
+            db_file.display()
+        );
+    }
+
+    if brain_dir.is_dir() {
+        println!(
+            "  {GREEN}[OK]{RESET} Pasta de cerebros: {}",
+            brain_dir.display()
+        );
+    } else {
+        println!(
+            "  {YELLOW}[!]{RESET} Pasta de cerebros ainda nao existe: {}",
+            brain_dir.display()
+        );
+    }
+
+    let cur_ws = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    if let Some(pin) = get_pinned_id_for_workspace(Some(&cur_ws), Some(&target_app)) {
+        println!("  {GREEN}[OK]{RESET} Workspace atual fixado no cerebro: {pin}");
+    } else {
+        println!(
+            "  {WHITE}[i]{RESET} Workspace atual sem fixacao manual (usando resolucao dinamica)"
+        );
+    }
+
+    println!("\n{CYAN}+------------------------------------------------------------------------+{RESET}\n");
+}
+
+fn main() -> ExitCode {
+    let args = Cli::parse();
+    let app_dir = args.app_dir.as_deref();
+    let cur_ws = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+
+    match args.command {
+        None | Some(Commands::Tui) => {
+            let mut sessions = fetch_sessions(Some(&cur_ws), false, app_dir, None);
+            if sessions.is_empty() {
+                sessions = fetch_sessions(Some(&cur_ws), true, app_dir, None);
+            }
+
+            match run_interactive_tui(sessions, &cur_ws, app_dir) {
+                Ok(TuiAction::Navigate(path)) => {
+                    println!("{}", path.display());
+                    ExitCode::SUCCESS
+                }
+                Ok(TuiAction::Exit) => ExitCode::SUCCESS,
+                Err(err) => {
+                    eprintln!("{RED}[!] Erro ao executar TUI: {err}{RESET}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+
+        Some(Commands::Resolve { target }) => {
+            if let Some(bid) = resolve_brain_target(target.as_deref(), Some(&cur_ws), app_dir) {
+                let p = get_brain_root(app_dir).join(bid);
+                println!("{}", p.display());
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
+
+        Some(Commands::Go { target }) => {
+            if let Some(bid) = resolve_brain_target(target.as_deref(), Some(&cur_ws), app_dir) {
+                let p = get_brain_root(app_dir).join(bid);
+                println!("{}", p.display());
+                ExitCode::SUCCESS
+            } else {
+                eprintln!("{RED}[!] Nenhum cerebro encontrado para resolver.{RESET}");
+                ExitCode::FAILURE
+            }
+        }
+
+        Some(Commands::List { all }) => {
+            let sessions = fetch_sessions(Some(&cur_ws), all, app_dir, None);
+            render_table(&sessions);
+            ExitCode::SUCCESS
+        }
+
+        Some(Commands::Info { target }) => {
+            let bid = match resolve_brain_target(target.as_deref(), Some(&cur_ws), app_dir) {
+                Some(b) => b,
+                None => {
+                    eprintln!("{RED}[!] Cerebro nao encontrado.{RESET}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let sessions = fetch_sessions(Some(&cur_ws), true, app_dir, None);
+            let session = sessions.iter().find(|s| s.id == bid);
+            let stats = get_brain_stats(&bid, app_dir);
+            render_preview(session, stats.as_ref(), &bid);
+            ExitCode::SUCCESS
+        }
+
+        Some(Commands::Artifacts { target }) => {
+            let bid = match resolve_brain_target(target.as_deref(), Some(&cur_ws), app_dir) {
+                Some(b) => b,
+                None => {
+                    eprintln!("{RED}[!] Cerebro nao encontrado.{RESET}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let stats = get_brain_stats(&bid, app_dir);
+            list_artifacts(&bid, stats.as_ref());
+            ExitCode::SUCCESS
+        }
+
+        Some(Commands::Open { target }) => {
+            let bid = match resolve_brain_target(target.as_deref(), Some(&cur_ws), app_dir) {
+                Some(b) => b,
+                None => {
+                    eprintln!("{RED}[!] Cerebro nao encontrado.{RESET}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let brain_path = get_brain_root(app_dir).join(&bid);
+            if open_in_file_manager(&brain_path) {
+                println!("{GREEN}[OK] Abrindo cerebro no gerenciador de arquivos: {bid}{RESET}");
+                ExitCode::SUCCESS
+            } else {
+                eprintln!(
+                    "{RED}[!] Falha ao abrir pasta do cerebro: {}{RESET}",
+                    brain_path.display()
+                );
+                ExitCode::FAILURE
+            }
+        }
+
+        Some(Commands::Edit { target }) => {
+            let bid = match resolve_brain_target(target.as_deref(), Some(&cur_ws), app_dir) {
+                Some(b) => b,
+                None => {
+                    eprintln!("{RED}[!] Cerebro nao encontrado.{RESET}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let brain_path = get_brain_root(app_dir).join(&bid);
+            if open_in_editor(&brain_path) {
+                ExitCode::SUCCESS
+            } else {
+                eprintln!(
+                    "{RED}[!] Falha ao abrir pasta no editor: {}{RESET}",
+                    brain_path.display()
+                );
+                ExitCode::FAILURE
+            }
+        }
+
+        Some(Commands::Pin { target }) => {
+            let bid = match resolve_brain_target(target.as_deref(), Some(&cur_ws), app_dir) {
+                Some(b) => b,
+                None => {
+                    eprintln!("{RED}[!] Informe um ID de sessao valido para fixar.{RESET}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            if let Err(e) = set_pin(&bid, Some(&cur_ws), app_dir) {
+                eprintln!("{RED}[!] Erro ao salvar fixacao: {e}{RESET}");
+                ExitCode::FAILURE
+            } else {
+                println!(
+                    "{GREEN}[OK] Cerebro {bid} fixado com sucesso para este workspace!{RESET}"
+                );
+                ExitCode::SUCCESS
+            }
+        }
+
+        Some(Commands::Unpin) => {
+            if remove_pin(Some(&cur_ws), app_dir) {
+                println!("{YELLOW}[OK] Fixacao removida do workspace atual.{RESET}");
+            } else {
+                println!("{WHITE}[i] Nenhuma fixacao encontrada para este workspace.{RESET}");
+            }
+            ExitCode::SUCCESS
+        }
+
+        Some(Commands::Init { shell }) => {
+            if let Some(code) = get_shell_integration(&shell) {
+                print!("{code}");
+                ExitCode::SUCCESS
+            } else {
+                eprintln!("{RED}[!] Shell desconhecida: {shell}{RESET}");
+                ExitCode::FAILURE
+            }
+        }
+
+        Some(Commands::Install { shell }) => {
+            let (ok, msg) = install_shell_integration(shell.as_deref());
+            if ok {
+                println!("{GREEN}[OK] {msg}{RESET}");
+                ExitCode::SUCCESS
+            } else {
+                eprintln!("{RED}[X] {msg}{RESET}");
+                ExitCode::FAILURE
+            }
+        }
+
+        Some(Commands::Doctor) => {
+            run_doctor(app_dir);
+            ExitCode::SUCCESS
+        }
+    }
+}

@@ -1,24 +1,6 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
-
-# Distribution / packaging
-dist/
-build/
-*.egg-info/
-.eggs/
-
-# Virtual environments
-.venv/
-env/
-venv/
-
-# Testing & coverage
-.pytest_cache/
-.coverage
-htmlcov/
-.ruff_cache/
+# Rust build artifacts
+target/
+**/*.rs.bk
 
 # Local brains / pins
 .brain
