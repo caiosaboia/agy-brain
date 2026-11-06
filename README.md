@@ -104,6 +104,7 @@ agy-brain tui
 * `Enter`: Jump (`cd`) into the selected brain directory.
 * `Ctrl + O`: Open the brain directory in OS file manager.
 * `Ctrl + P`: Pin or unpin the selected session for the current workspace.
+* `Ctrl + D`: Delete selected session (prompts modal confirmation).
 * `Ctrl + E`: Open the brain folder in your default code editor.
 * `Ctrl + A`: Toggle between sessions of the current workspace and all global sessions.
 * `Esc`: Exit dashboard.
@@ -154,6 +155,19 @@ agy-brain tui
   agy-brain unpin
   ```
 
+* **Delete session:**
+  ```bash
+  # Delete primary session for current workspace (interactive confirmation):
+  agy-brain delete
+
+  # Delete by index or UUID:
+  agy-brain delete 3
+  agy-brain delete 706a4ef8-9dc7-49b4-93bc-3d4a716f2b84
+
+  # Force delete without confirmation prompt:
+  agy-brain delete 3 --force
+  ```
+
 * **Open in File Manager:**
   ```bash
   agy-brain open
@@ -184,6 +198,7 @@ agy-brain tui
 | `agy-brain edit [target]` | | Open session directory in code editor |
 | `agy-brain pin [id]` | | Pin session as primary for the current workspace |
 | `agy-brain unpin` | | Remove pin from current workspace |
+| `agy-brain delete [id]` | `rm`, `remove` | Delete session from SQLite, FTS index, and disk |
 | `agy-brain doctor` | | Validate Antigravity DB paths and environment health |
 | `agy-brain init <shell>` | | Output shell integration function script |
 | `agy-brain install [shell]`| | Automatically append hook to user's shell profile |

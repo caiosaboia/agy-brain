@@ -1,4 +1,6 @@
-use crate::core::{get_brain_root, get_brain_stats, set_pin, BrainStats, SessionSummary};
+use crate::core::{
+    delete_session, get_brain_root, get_brain_stats, set_pin, BrainStats, SessionSummary,
+};
 use crate::ui::{open_in_editor, open_in_file_manager};
 use chrono::{DateTime, Utc};
 use crossterm::{
@@ -11,7 +13,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Frame, Terminal,
 };
 use std::io::{self, stderr};
@@ -30,6 +32,7 @@ struct AppState {
     all_mode: bool,
     workspace: PathBuf,
     app_dir: Option<PathBuf>,
+    confirm_delete: bool,
 }
 
 impl AppState {
@@ -47,6 +50,7 @@ impl AppState {
             all_mode: false,
             workspace,
             app_dir,
+            confirm_delete: false,
         }
     }
 
@@ -148,6 +152,31 @@ fn main_loop<B: ratatui::backend::Backend>(
                 continue;
             }
 
+            if state.confirm_delete {
+                match (key.modifiers, key.code) {
+                    (KeyModifiers::NONE, KeyCode::Char('y') | KeyCode::Char('s'))
+                    | (KeyModifiers::NONE, KeyCode::Enter) => {
+                        if let Some(session) = state.selected_session() {
+                            let _ = delete_session(
+                                &session.id,
+                                Some(&state.workspace),
+                                state.app_dir.as_deref(),
+                                None,
+                            );
+                            let target_id = session.id.clone();
+                            state.all_sessions.retain(|s| s.id != target_id);
+                            state.filter_sessions();
+                        }
+                        state.confirm_delete = false;
+                    }
+                    (KeyModifiers::NONE, KeyCode::Char('n') | KeyCode::Esc) => {
+                        state.confirm_delete = false;
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+
             match (key.modifiers, key.code) {
                 (KeyModifiers::NONE, KeyCode::Esc) => {
                     return Ok(TuiAction::Exit);
@@ -178,6 +207,11 @@ fn main_loop<B: ratatui::backend::Backend>(
                         for s in &mut state.all_sessions {
                             s.pinned = s.id == cur_id;
                         }
+                    }
+                }
+                (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
+                    if state.selected_session().is_some() {
+                        state.confirm_delete = true;
                     }
                 }
                 (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
@@ -346,6 +380,14 @@ fn ui(f: &mut Frame, state: &mut AppState) {
         ),
         Span::raw(" Fixar  "),
         Span::styled(
+            " [Ctrl+D] ",
+            Style::default()
+                .fg(Color::White)
+                .bg(Color::Red)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" Apagar  "),
+        Span::styled(
             " [Ctrl+A] ",
             Style::default()
                 .fg(Color::Black)
@@ -361,6 +403,100 @@ fn ui(f: &mut Frame, state: &mut AppState) {
     ]))
     .block(Block::default().borders(Borders::ALL).title(" Atalhos "));
     f.render_widget(footer, chunks[2]);
+
+    if state.confirm_delete {
+        let area = centered_rect(60, 25, f.area());
+        f.render_widget(Clear, area);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Red))
+            .title(Span::styled(
+                " CONFIRMAR EXCLUSAO ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        let selected_title = state
+            .selected_session()
+            .map(|s| s.title.as_str())
+            .unwrap_or("(sem titulo)");
+        let selected_id = state
+            .selected_session()
+            .map(|s| s.id.as_str())
+            .unwrap_or("");
+
+        let text = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "Deseja realmente apagar esta sessao e seus arquivos do disco?",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Sessao: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    selected_title,
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("ID:     ", Style::default().fg(Color::DarkGray)),
+                Span::styled(selected_id, Style::default().fg(Color::DarkGray)),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled(
+                    " [y / Enter] ",
+                    Style::default()
+                        .fg(Color::White)
+                        .bg(Color::Red)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" Confirmar exclusao   "),
+                Span::styled(
+                    " [n / Esc] ",
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" Cancelar"),
+            ]),
+            Line::from(""),
+        ];
+        let p = Paragraph::new(text)
+            .block(block)
+            .alignment(ratatui::layout::Alignment::Center);
+        f.render_widget(p, area);
+    }
+}
+
+fn centered_rect(
+    percent_x: u16,
+    percent_y: u16,
+    r: ratatui::layout::Rect,
+) -> ratatui::layout::Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }
 
 fn render_tui_preview<'a>(

@@ -10,8 +10,8 @@ use std::process::ExitCode;
 
 use cli::{Cli, Commands};
 use core::{
-    fetch_sessions, get_brain_root, get_brain_stats, get_db_path, get_default_app_dir,
-    get_pinned_id_for_workspace, remove_pin, resolve_brain_target, set_pin,
+    delete_session, fetch_sessions, get_brain_root, get_brain_stats, get_db_path,
+    get_default_app_dir, get_pinned_id_for_workspace, remove_pin, resolve_brain_target, set_pin,
 };
 use shells::{get_shell_integration, install_shell_integration};
 use tui::{run_interactive_tui, TuiAction};
@@ -237,6 +237,76 @@ fn main() -> ExitCode {
                 println!("{WHITE}[i] Nenhuma fixacao encontrada para este workspace.{RESET}");
             }
             ExitCode::SUCCESS
+        }
+
+        Some(Commands::Delete { target, force }) => {
+            let target_str = target.as_deref().unwrap_or("default");
+            let resolved_id = match resolve_brain_target(Some(target_str), Some(&cur_ws), app_dir) {
+                Some(id) => id,
+                None => {
+                    eprintln!(
+                        "{RED}[!] Sessao '{target_str}' nao encontrada para exclusao.{RESET}"
+                    );
+                    return ExitCode::FAILURE;
+                }
+            };
+
+            let brain_path = get_brain_root(app_dir).join(&resolved_id);
+
+            if !force {
+                println!(
+                    "\n{YELLOW}+------------------------------------------------------------------------+{RESET}"
+                );
+                println!(
+                    "{YELLOW}| CONFIRMACAO DE EXCLUSAO DE SESSAO                                      |{RESET}"
+                );
+                println!(
+                    "{YELLOW}+------------------------------------------------------------------------+{RESET}"
+                );
+                println!("  ID:        {WHITE}{resolved_id}{RESET}");
+                println!("  Diretorio: {WHITE}{}{RESET}", brain_path.display());
+                println!(
+                    "{YELLOW}+------------------------------------------------------------------------+{RESET}"
+                );
+                print!("\n  Deseja realmente apagar esta sessao e seus arquivos? (s/N): ");
+                use std::io::Write;
+                let _ = std::io::stdout().flush();
+
+                let mut input = String::new();
+                if std::io::stdin().read_line(&mut input).is_err() {
+                    println!("\n{YELLOW}[i] Operacao cancelada.{RESET}");
+                    return ExitCode::SUCCESS;
+                }
+
+                let answer = input.trim().to_lowercase();
+                if answer != "s" && answer != "sim" && answer != "y" && answer != "yes" {
+                    println!("{YELLOW}[i] Exclusao cancelada pelo usuario.{RESET}");
+                    return ExitCode::SUCCESS;
+                }
+            }
+
+            match delete_session(&resolved_id, Some(&cur_ws), app_dir, None) {
+                Ok(res) => {
+                    println!(
+                        "{GREEN}[OK] Sessao {} apagada com sucesso!{RESET}",
+                        res.conversation_id
+                    );
+                    if res.db_deleted {
+                        println!("  [OK] Registro removido do SQLite.");
+                    }
+                    if res.folder_deleted {
+                        println!("  [OK] Pasta do cerebro removida do disco.");
+                    }
+                    if res.pins_removed {
+                        println!("  [OK] Fixacoes desvinculadas.");
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(err) => {
+                    eprintln!("{RED}[!] Erro ao apagar sessao: {err}{RESET}");
+                    ExitCode::FAILURE
+                }
+            }
         }
 
         Some(Commands::Init { shell }) => {

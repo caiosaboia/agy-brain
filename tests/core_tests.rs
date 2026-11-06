@@ -7,8 +7,8 @@ use tempfile::tempdir;
 mod core;
 
 use core::{
-    fetch_sessions, get_brain_stats, get_pinned_id_for_workspace, normalize_workspace_path,
-    remove_pin, resolve_brain_target, set_pin,
+    delete_session, fetch_sessions, get_brain_stats, get_pinned_id_for_workspace,
+    normalize_workspace_path, remove_pin, resolve_brain_target, set_pin,
 };
 
 #[test]
@@ -186,4 +186,72 @@ fn test_resolve_brain_target() {
     let direct_uuid = "99999999-9999-9999-9999-999999999999";
     let resolved_uuid = resolve_brain_target(Some(direct_uuid), Some(&ws), Some(&app_dir));
     assert_eq!(resolved_uuid, Some(direct_uuid.to_string()));
+}
+
+#[test]
+fn test_delete_session() {
+    let tmp = tempdir().unwrap();
+    let app_dir = tmp.path().join("agy_home");
+    let ws_dir = tmp.path().join("my_project");
+    fs::create_dir_all(&app_dir).unwrap();
+    fs::create_dir_all(&ws_dir).unwrap();
+
+    let db_path = app_dir.join("conversation_summaries.db");
+    let conn = Connection::open(&db_path).unwrap();
+    conn.execute(
+        "CREATE TABLE conversation_summaries (
+            conversation_id text PRIMARY KEY,
+            title text NOT NULL DEFAULT '',
+            preview text NOT NULL DEFAULT '',
+            step_count integer NOT NULL DEFAULT 0,
+            last_modified_time datetime NOT NULL,
+            workspace_uris text NOT NULL,
+            status text NOT NULL DEFAULT ''
+        )",
+        [],
+    )
+    .unwrap();
+
+    let target_uuid = "44444444-4444-4444-4444-444444444444";
+    conn.execute(
+        "INSERT INTO conversation_summaries VALUES
+        ('44444444-4444-4444-4444-444444444444', 'Session to Delete', '', 42, '2026-11-05 12:00:00', '[\"file:///C:/Users/dev/repo\"]', 'IDLE')",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    // Create brain folder on disk
+    let brain_dir = app_dir.join("brain").join(target_uuid);
+    fs::create_dir_all(&brain_dir).unwrap();
+    fs::write(brain_dir.join("artifact.md"), "# Delete me").unwrap();
+
+    // Create local .brain pin
+    fs::write(ws_dir.join(".brain"), target_uuid).unwrap();
+
+    // Perform deletion
+    let res = delete_session(target_uuid, Some(&ws_dir), Some(&app_dir), Some(&db_path)).unwrap();
+
+    assert_eq!(res.conversation_id, target_uuid);
+    assert_eq!(res.title, "Session to Delete");
+    assert!(res.db_deleted);
+    assert!(res.folder_deleted);
+    assert!(res.pins_removed);
+
+    // Verify database record is gone
+    let conn = Connection::open(&db_path).unwrap();
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM conversation_summaries WHERE conversation_id = ?1",
+            [target_uuid],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 0);
+
+    // Verify folder on disk is deleted
+    assert!(!brain_dir.exists());
+
+    // Verify pin was removed
+    assert!(!ws_dir.join(".brain").exists());
 }
