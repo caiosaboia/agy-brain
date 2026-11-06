@@ -4,13 +4,16 @@ use crate::core::{
 use crate::ui::{open_in_editor, open_in_file_manager};
 use chrono::{DateTime, Utc};
 use crossterm::{
-    event::{self, Event, KeyCode, KeyModifiers},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseButton,
+        MouseEventKind,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
@@ -24,6 +27,12 @@ pub enum TuiAction {
     Exit,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeleteModalFocus {
+    Cancel,
+    Confirm,
+}
+
 struct AppState {
     all_sessions: Vec<SessionSummary>,
     filtered_indices: Vec<usize>,
@@ -33,6 +42,8 @@ struct AppState {
     workspace: PathBuf,
     app_dir: Option<PathBuf>,
     confirm_delete: bool,
+    delete_modal_focus: DeleteModalFocus,
+    modal_rect: Option<Rect>,
 }
 
 impl AppState {
@@ -51,6 +62,8 @@ impl AppState {
             workspace,
             app_dir,
             confirm_delete: false,
+            delete_modal_focus: DeleteModalFocus::Cancel,
+            modal_rect: None,
         }
     }
 
@@ -121,7 +134,7 @@ pub fn run_interactive_tui(
 ) -> io::Result<TuiAction> {
     enable_raw_mode()?;
     let mut stderr_handle = stderr();
-    execute!(stderr_handle, EnterAlternateScreen)?;
+    execute!(stderr_handle, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stderr_handle);
     let mut terminal = Terminal::new(backend)?;
 
@@ -134,7 +147,11 @@ pub fn run_interactive_tui(
     let res = main_loop(&mut terminal, &mut state);
 
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
     terminal.show_cursor()?;
 
     res
@@ -147,15 +164,90 @@ fn main_loop<B: ratatui::backend::Backend>(
     loop {
         terminal.draw(|f| ui(f, state))?;
 
-        if let Event::Key(key) = event::read()? {
+        let event = event::read()?;
+
+        if let Event::Mouse(mouse) = &event {
+            if state.confirm_delete {
+                if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                    if let Some(rect) = state.modal_rect {
+                        if mouse.column >= rect.x
+                            && mouse.column < rect.x + rect.width
+                            && mouse.row >= rect.y
+                            && mouse.row < rect.y + rect.height
+                        {
+                            let button_row_start = rect.y + rect.height.saturating_sub(5);
+                            if mouse.row >= button_row_start {
+                                let mid_x = rect.x + rect.width / 2;
+                                if mouse.column < mid_x {
+                                    state.confirm_delete = false;
+                                    state.delete_modal_focus = DeleteModalFocus::Cancel;
+                                } else {
+                                    if let Some(session) = state.selected_session() {
+                                        let _ = delete_session(
+                                            &session.id,
+                                            Some(&state.workspace),
+                                            state.app_dir.as_deref(),
+                                            None,
+                                        );
+                                        let target_id = session.id.clone();
+                                        state.all_sessions.retain(|s| s.id != target_id);
+                                        state.filter_sessions();
+                                    }
+                                    state.confirm_delete = false;
+                                    state.delete_modal_focus = DeleteModalFocus::Cancel;
+                                }
+                            }
+                        } else {
+                            state.confirm_delete = false;
+                            state.delete_modal_focus = DeleteModalFocus::Cancel;
+                        }
+                    }
+                }
+                continue;
+            }
+        }
+
+        if let Event::Key(key) = event {
             if key.kind != event::KeyEventKind::Press {
                 continue;
             }
 
             if state.confirm_delete {
                 match (key.modifiers, key.code) {
-                    (KeyModifiers::NONE, KeyCode::Char('y') | KeyCode::Char('s'))
-                    | (KeyModifiers::NONE, KeyCode::Enter) => {
+                    (
+                        KeyModifiers::NONE,
+                        KeyCode::Left
+                        | KeyCode::Right
+                        | KeyCode::Up
+                        | KeyCode::Down
+                        | KeyCode::Tab
+                        | KeyCode::BackTab
+                        | KeyCode::Char('h')
+                        | KeyCode::Char('l'),
+                    ) => {
+                        state.delete_modal_focus = match state.delete_modal_focus {
+                            DeleteModalFocus::Cancel => DeleteModalFocus::Confirm,
+                            DeleteModalFocus::Confirm => DeleteModalFocus::Cancel,
+                        };
+                    }
+                    (KeyModifiers::NONE, KeyCode::Enter) => {
+                        if state.delete_modal_focus == DeleteModalFocus::Confirm {
+                            if let Some(session) = state.selected_session() {
+                                let _ = delete_session(
+                                    &session.id,
+                                    Some(&state.workspace),
+                                    state.app_dir.as_deref(),
+                                    None,
+                                );
+                                let target_id = session.id.clone();
+                                state.all_sessions.retain(|s| s.id != target_id);
+                                state.filter_sessions();
+                            }
+                        }
+                        state.confirm_delete = false;
+                        state.delete_modal_focus = DeleteModalFocus::Cancel;
+                    }
+                    (KeyModifiers::NONE, KeyCode::Char('y') | KeyCode::Char('s')) => {
                         if let Some(session) = state.selected_session() {
                             let _ = delete_session(
                                 &session.id,
@@ -168,9 +260,14 @@ fn main_loop<B: ratatui::backend::Backend>(
                             state.filter_sessions();
                         }
                         state.confirm_delete = false;
+                        state.delete_modal_focus = DeleteModalFocus::Cancel;
                     }
-                    (KeyModifiers::NONE, KeyCode::Char('n') | KeyCode::Esc) => {
+                    (
+                        KeyModifiers::NONE,
+                        KeyCode::Char('n') | KeyCode::Esc | KeyCode::Char('q'),
+                    ) => {
                         state.confirm_delete = false;
+                        state.delete_modal_focus = DeleteModalFocus::Cancel;
                     }
                     _ => {}
                 }
@@ -212,6 +309,7 @@ fn main_loop<B: ratatui::backend::Backend>(
                 (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
                     if state.selected_session().is_some() {
                         state.confirm_delete = true;
+                        state.delete_modal_focus = DeleteModalFocus::Cancel;
                     }
                 }
                 (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
@@ -405,17 +503,20 @@ fn ui(f: &mut Frame, state: &mut AppState) {
     f.render_widget(footer, chunks[2]);
 
     if state.confirm_delete {
-        let area = centered_rect(60, 25, f.area());
+        let area = centered_rect(65, 30, f.area());
+        state.modal_rect = Some(area);
         f.render_widget(Clear, area);
+
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Red))
             .title(Span::styled(
-                " CONFIRMAR EXCLUSAO ",
+                " CONFIRMAR EXCLUSAO DEFINITIVA ",
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
             ));
+
         let selected_title = state
             .selected_session()
             .map(|s| s.title.as_str())
@@ -425,10 +526,43 @@ fn ui(f: &mut Frame, state: &mut AppState) {
             .map(|s| s.id.as_str())
             .unwrap_or("");
 
+        let (cancel_btn, confirm_btn) = match state.delete_modal_focus {
+            DeleteModalFocus::Cancel => (
+                Span::styled(
+                    "  >>> [ CANCELAR ] <<<  ",
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "      [ APAGAR SESSAO ]      ",
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .bg(Color::Rgb(40, 20, 20)),
+                ),
+            ),
+            DeleteModalFocus::Confirm => (
+                Span::styled(
+                    "      [ CANCELAR ]      ",
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .bg(Color::Rgb(20, 40, 20)),
+                ),
+                Span::styled(
+                    "  >>> [ APAGAR SESSAO ] <<<  ",
+                    Style::default()
+                        .fg(Color::White)
+                        .bg(Color::Red)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ),
+        };
+
         let text = vec![
             Line::from(""),
             Line::from(Span::styled(
-                "Deseja realmente apagar esta sessao e seus arquivos do disco?",
+                "Esta acao ira apagar a pasta do cerebro e o registro permanentemente!",
                 Style::default()
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
@@ -448,30 +582,28 @@ fn ui(f: &mut Frame, state: &mut AppState) {
                 Span::styled(selected_id, Style::default().fg(Color::DarkGray)),
             ]),
             Line::from(""),
+            Line::from(vec![cancel_btn, Span::raw("   "), confirm_btn]),
+            Line::from(""),
             Line::from(vec![
                 Span::styled(
-                    " [y / Enter] ",
-                    Style::default()
-                        .fg(Color::White)
-                        .bg(Color::Red)
-                        .add_modifier(Modifier::BOLD),
+                    "Setas [<- / ->] ou [Tab] ",
+                    Style::default().fg(Color::Yellow),
                 ),
-                Span::raw(" Confirmar exclusao   "),
-                Span::styled(
-                    " [n / Esc] ",
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::Green)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(" Cancelar"),
+                Span::raw("Mudar opcao | "),
+                Span::styled("[Enter] ", Style::default().fg(Color::Cyan)),
+                Span::raw("Executar | "),
+                Span::styled("[Esc] ", Style::default().fg(Color::DarkGray)),
+                Span::raw("Fechar | Clique com o mouse no botao"),
             ]),
             Line::from(""),
         ];
+
         let p = Paragraph::new(text)
             .block(block)
             .alignment(ratatui::layout::Alignment::Center);
         f.render_widget(p, area);
+    } else {
+        state.modal_rect = None;
     }
 }
 
