@@ -460,6 +460,13 @@ pub fn resolve_brain_target(
         return None;
     }
 
+    // Try prefix match on session ids
+    for s in &sessions {
+        if s.id.starts_with(t) {
+            return Some(s.id.clone());
+        }
+    }
+
     if t == "default" {
         if let Some(pinned) = get_pinned_id_for_workspace(workspace_path, app_dir) {
             return Some(pinned);
@@ -470,4 +477,115 @@ pub fn resolve_brain_target(
     }
 
     None
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeleteResult {
+    pub conversation_id: String,
+    pub title: String,
+    pub db_deleted: bool,
+    pub folder_deleted: bool,
+    pub pins_removed: bool,
+}
+
+pub fn delete_session(
+    target: &str,
+    workspace_path: Option<&Path>,
+    app_dir: Option<&Path>,
+    db_path: Option<&Path>,
+) -> Result<DeleteResult, Box<dyn std::error::Error>> {
+    let target_db = match db_path {
+        Some(p) => p.to_path_buf(),
+        None => get_db_path(app_dir),
+    };
+
+    let resolved_id = resolve_brain_target(Some(target), workspace_path, app_dir)
+        .ok_or_else(|| format!("Sessao '{}' nao encontrada.", target))?;
+
+    let mut title = String::new();
+    let mut db_deleted = false;
+
+    if target_db.is_file() {
+        if let Ok(conn) = Connection::open(&target_db) {
+            if let Ok(t) = conn.query_row(
+                "SELECT title FROM conversation_summaries WHERE conversation_id = ?1",
+                rusqlite::params![&resolved_id],
+                |row| row.get::<_, String>(0),
+            ) {
+                title = t;
+            }
+
+            if let Ok(rows) = conn.execute(
+                "DELETE FROM conversation_summaries WHERE conversation_id = ?1",
+                rusqlite::params![&resolved_id],
+            ) {
+                db_deleted = rows > 0;
+            }
+
+            // Clean up full text search index if present
+            let _ = conn.execute(
+                "DELETE FROM conversations_fts WHERE conversation_id = ?1",
+                rusqlite::params![&resolved_id],
+            );
+        }
+    }
+
+    // Remove folder on disk
+    let brain_dir = get_brain_root(app_dir).join(&resolved_id);
+    let mut folder_deleted = false;
+    if brain_dir.is_dir() && fs::remove_dir_all(&brain_dir).is_ok() {
+        folder_deleted = true;
+    }
+
+    // Clean up pins
+    let mut pins_removed = false;
+    let ws = match workspace_path {
+        Some(p) => p.to_path_buf(),
+        None => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+    };
+
+    let dot_brain = ws.join(".brain");
+    if dot_brain.is_file() {
+        if let Ok(content) = fs::read_to_string(&dot_brain) {
+            if content.trim() == resolved_id {
+                let _ = fs::remove_file(dot_brain);
+                pins_removed = true;
+            }
+        }
+    }
+
+    let pins_file = get_pins_file(app_dir);
+    if pins_file.is_file() {
+        if let Ok(content) = fs::read_to_string(&pins_file) {
+            if let Ok(mut pins) =
+                serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content)
+            {
+                let mut changed = false;
+                pins.retain(|_, v| {
+                    if let Some(s) = v.as_str() {
+                        if s == resolved_id {
+                            changed = true;
+                            return false;
+                        }
+                    }
+                    true
+                });
+                if changed {
+                    let _ = fs::write(
+                        &pins_file,
+                        serde_json::to_string_pretty(&pins).unwrap_or_default(),
+                    );
+                    pins_removed = true;
+                }
+            }
+        }
+    }
+
+    Ok(DeleteResult {
+        conversation_id: resolved_id,
+        title,
+        db_deleted,
+        folder_deleted,
+        pins_removed,
+    })
 }

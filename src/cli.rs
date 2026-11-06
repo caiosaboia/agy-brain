@@ -67,6 +67,19 @@ pub enum Commands {
     #[command(about = "Remove pin for current workspace")]
     Unpin,
 
+    #[command(
+        name = "delete",
+        aliases = ["rm", "remove"],
+        about = "Delete a session, its brain folder and database entry"
+    )]
+    Delete {
+        #[arg(help = "Brain index or UUID to delete")]
+        target: Option<String>,
+
+        #[arg(short, long, help = "Skip interactive confirmation prompt")]
+        force: bool,
+    },
+
     #[command(about = "Print absolute brain folder path")]
     Resolve {
         #[arg(help = "Brain index or UUID")]
