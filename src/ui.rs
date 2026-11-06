@@ -298,3 +298,63 @@ pub fn open_in_editor(target_path: &Path) -> bool {
         None => open_in_file_manager(target_path),
     }
 }
+
+pub fn open_in_neovim(target_path: &Path) -> bool {
+    if !target_path.exists() {
+        return false;
+    }
+
+    let mut candidate = "nvim";
+    #[cfg(target_os = "windows")]
+    {
+        if Command::new("where")
+            .arg("nvim")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            candidate = "nvim";
+        } else if Command::new("where")
+            .arg("vim")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            candidate = "vim";
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        if Command::new("which")
+            .arg("nvim")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            candidate = "nvim";
+        } else if Command::new("which")
+            .arg("vim")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            candidate = "vim";
+        }
+    }
+
+    let status = Command::new(candidate)
+        .arg(".")
+        .current_dir(target_path)
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status();
+
+    match status {
+        Ok(s) => s.success(),
+        Err(e) => {
+            eprintln!("[!] Failed to execute Neovim: {}", e);
+            false
+        }
+    }
+}

@@ -16,8 +16,8 @@ use core::{
 use shells::{get_shell_integration, install_shell_integration};
 use tui::{run_interactive_tui, TuiAction};
 use ui::{
-    list_artifacts, open_in_editor, open_in_file_manager, render_preview, render_table, CYAN,
-    GREEN, RED, RESET, WHITE, YELLOW,
+    list_artifacts, open_in_editor, open_in_file_manager, open_in_neovim, render_preview,
+    render_table, CYAN, GREEN, RED, RESET, WHITE, YELLOW,
 };
 
 fn run_doctor(app_dir: Option<&Path>) {
@@ -205,6 +205,26 @@ fn main() -> ExitCode {
             } else {
                 eprintln!(
                     "{RED}[!] Falha ao abrir pasta no editor: {}{RESET}",
+                    brain_path.display()
+                );
+                ExitCode::FAILURE
+            }
+        }
+
+        Some(Commands::Nvim { target }) => {
+            let bid = match resolve_brain_target(target.as_deref(), Some(&cur_ws), app_dir) {
+                Some(b) => b,
+                None => {
+                    eprintln!("{RED}[!] Nenhum cerebro encontrado para abrir com Neovim.{RESET}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let brain_path = get_brain_root(app_dir).join(&bid);
+            if open_in_neovim(&brain_path) {
+                ExitCode::SUCCESS
+            } else {
+                eprintln!(
+                    "{RED}[!] Falha ao abrir pasta no Neovim: {}{RESET}",
                     brain_path.display()
                 );
                 ExitCode::FAILURE
