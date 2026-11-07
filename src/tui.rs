@@ -1,6 +1,6 @@
 use crate::core::{
-    delete_session, fetch_sessions_ext, get_brain_root, get_brain_stats, rename_session, set_pin,
-    truncate_str, BrainStats, SessionSummary,
+    delete_session, fetch_sessions_ext, get_brain_root, get_brain_stats, remove_pin,
+    rename_session, set_pin, truncate_str, BrainStats, SessionSummary,
 };
 use crate::ui::{open_in_file_manager, open_in_neovim};
 use chrono::{DateTime, Utc};
@@ -353,15 +353,26 @@ fn main_loop<B: ratatui::backend::Backend>(
                 }
                 (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
                     if let Some(session) = state.selected_session() {
-                        let _ = set_pin(
-                            &session.id,
-                            Some(&state.workspace),
-                            state.app_dir.as_deref(),
-                        );
                         let cur_id = session.id.clone();
-                        for s in &mut state.all_sessions {
-                            s.pinned = s.id == cur_id;
+                        let was_pinned = session.pinned;
+                        if was_pinned {
+                            let _ = remove_pin(Some(&state.workspace), state.app_dir.as_deref());
+                            for s in &mut state.all_sessions {
+                                if s.id == cur_id {
+                                    s.pinned = false;
+                                }
+                            }
+                        } else {
+                            let _ =
+                                set_pin(&cur_id, Some(&state.workspace), state.app_dir.as_deref());
+                            for s in &mut state.all_sessions {
+                                s.pinned = s.id == cur_id;
+                            }
                         }
+                        state.all_sessions.sort_by(|a, b| {
+                            b.pinned.cmp(&a.pinned).then_with(|| b.steps.cmp(&a.steps))
+                        });
+                        state.filter_sessions();
                     }
                 }
                 (KeyModifiers::CONTROL, KeyCode::Char('r')) => {

@@ -311,7 +311,9 @@ pub fn remove_pin(workspace_path: Option<&Path>, app_dir: Option<&Path>) -> bool
             if let Ok(mut pins) =
                 serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content)
             {
-                if pins.remove(&norm_ws).is_some() {
+                let before_len = pins.len();
+                pins.retain(|k, _| normalize_workspace_path(k) != norm_ws);
+                if pins.len() < before_len {
                     let _ = fs::write(
                         &pins_file,
                         serde_json::to_string_pretty(&pins).unwrap_or_default(),
