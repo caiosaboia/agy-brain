@@ -399,3 +399,99 @@ fn test_title_cascade_subagents_and_prune() {
     assert_eq!(pruned.len(), 1);
     assert!(!app_dir.join("brain").join(ghost_id).exists());
 }
+
+#[test]
+fn test_normalize_url_encoded_workspace_path() {
+    assert_eq!(
+        normalize_workspace_path("file:///c%3A/Users/dev/Meu%20Projeto/"),
+        if cfg!(target_os = "windows") {
+            "c:/users/dev/meu projeto"
+        } else {
+            "c:/Users/dev/Meu Projeto"
+        }
+    );
+}
+
+#[test]
+fn test_strict_workspace_isolation() {
+    let tmp = tempdir().unwrap();
+    let app_dir = tmp.path().join("agy_home");
+    fs::create_dir_all(&app_dir).unwrap();
+    let db_path = app_dir.join("conversation_summaries.db");
+
+    let conn = Connection::open(&db_path).unwrap();
+    conn.execute(
+        "CREATE TABLE conversation_summaries (
+            conversation_id text PRIMARY KEY,
+            title text NOT NULL DEFAULT '',
+            preview text NOT NULL DEFAULT '',
+            step_count integer NOT NULL DEFAULT 0,
+            last_modified_time datetime NOT NULL,
+            workspace_uris text NOT NULL,
+            status text NOT NULL DEFAULT ''
+        )",
+        [],
+    )
+    .unwrap();
+
+    conn.execute(
+        "INSERT INTO conversation_summaries VALUES
+        ('parent-1111-1111-1111-111111111111', 'Home Session', '', 500, '2026-11-05 12:00:00', '[\"file:///C:/Users/cocad\"]', 'IDLE'),
+        ('exact-2222-2222-2222-222222222222', 'Project Session', '', 100, '2026-11-05 13:00:00', '[\"file:///c%3A/Users/cocad/projetos/my-app\"]', 'IDLE'),
+        ('child-3333-3333-3333-333333333333', 'Subfolder Session', '', 50, '2026-11-05 14:00:00', '[\"file:///C:/Users/cocad/projetos/my-app/sub\"]', 'IDLE')",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    let ws = PathBuf::from("C:/Users/cocad/projetos/my-app");
+    let sessions = fetch_sessions(Some(&ws), false, Some(&app_dir), Some(&db_path));
+
+    // Must ONLY return the exact directory session (and decode %3A), never parent or child folders
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].id, "exact-2222-2222-2222-222222222222");
+}
+
+#[test]
+fn test_set_pin_updates_sqlite_workspace_uris() {
+    let tmp = tempdir().unwrap();
+    let app_dir = tmp.path().join("agy_home");
+    let ws_dir = tmp.path().join("new_repo");
+    fs::create_dir_all(&app_dir).unwrap();
+    fs::create_dir_all(&ws_dir).unwrap();
+
+    let db_path = app_dir.join("conversation_summaries.db");
+    let conn = Connection::open(&db_path).unwrap();
+    conn.execute(
+        "CREATE TABLE conversation_summaries (
+            conversation_id text PRIMARY KEY,
+            title text NOT NULL DEFAULT '',
+            preview text NOT NULL DEFAULT '',
+            step_count integer NOT NULL DEFAULT 0,
+            last_modified_time datetime NOT NULL,
+            workspace_uris text NOT NULL,
+            status text NOT NULL DEFAULT ''
+        )",
+        [],
+    )
+    .unwrap();
+
+    let target_uuid = "88888888-8888-8888-8888-888888888888";
+    conn.execute(
+        "INSERT INTO conversation_summaries VALUES
+        (?1, 'Cross Workspace Session', '', 120, '2026-11-05 12:00:00', '[\"file:///C:/Users/cocad/projetos/other\"]', 'IDLE')",
+        rusqlite::params![target_uuid],
+    )
+    .unwrap();
+    drop(conn);
+
+    // Pin session to ws_dir
+    set_pin(target_uuid, Some(&ws_dir), Some(&app_dir)).unwrap();
+
+    // Even after removing the pin file, the session now has ws_dir linked in SQLite workspace_uris
+    remove_pin(Some(&ws_dir), Some(&app_dir));
+
+    let sessions = fetch_sessions(Some(&ws_dir), false, Some(&app_dir), Some(&db_path));
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].id, target_uuid);
+}

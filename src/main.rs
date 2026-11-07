@@ -101,11 +101,7 @@ fn main() -> ExitCode {
 
     match args.command {
         None | Some(Commands::Tui) => {
-            let mut sessions =
-                fetch_sessions_ext(Some(&cur_ws), false, args.subagents, app_dir, None);
-            if sessions.is_empty() {
-                sessions = fetch_sessions_ext(Some(&cur_ws), true, args.subagents, app_dir, None);
-            }
+            let sessions = fetch_sessions_ext(Some(&cur_ws), false, args.subagents, app_dir, None);
 
             match run_interactive_tui(sessions, &cur_ws, app_dir, args.subagents) {
                 Ok(TuiAction::Navigate(path)) => {

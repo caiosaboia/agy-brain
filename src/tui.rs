@@ -899,9 +899,23 @@ fn render_tui_preview<'a>(
         }
     } else {
         text_lines.push(Line::from(Span::styled(
-            "Nenhuma sessao selecionada.",
-            Style::default().fg(Color::DarkGray),
+            "Nenhuma sessao registrada para este diretorio.",
+            Style::default().fg(Color::Yellow),
         )));
+        text_lines.push(Line::from(""));
+        text_lines.push(Line::from(vec![
+            Span::styled("Dica: Pressione ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "[Ctrl+A]",
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                " se desejar visualizar sessoes de todos os projetos.",
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]));
     }
 
     text_lines.push(Line::from(""));

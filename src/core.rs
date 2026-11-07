@@ -142,11 +142,33 @@ pub fn get_brain_root(app_dir: Option<&Path>) -> PathBuf {
     }
 }
 
+fn decode_percent_encoding(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(h), Some(l)) = (
+                (bytes[i + 1] as char).to_digit(16),
+                (bytes[i + 2] as char).to_digit(16),
+            ) {
+                out.push(((h << 4) | l) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 pub fn normalize_workspace_path(path_str: &str) -> String {
     if path_str.is_empty() {
         return String::new();
     }
-    let mut clean = path_str.trim();
+    let decoded = decode_percent_encoding(path_str.trim());
+    let mut clean = decoded.as_str();
     if clean.starts_with("file:///") {
         clean = &clean[8..];
     } else if clean.starts_with("file://") {
@@ -174,21 +196,14 @@ pub fn get_pinned_id_for_workspace(
 
     let norm_ws = normalize_workspace_path(&ws.to_string_lossy());
 
-    // 1. Walk up directory tree looking for .brain
-    let mut cur = ws.clone();
-    loop {
-        let candidate = cur.join(".brain");
-        if candidate.is_file() {
-            if let Ok(content) = fs::read_to_string(&candidate) {
-                let trimmed = content.trim();
-                if trimmed.len() >= 30 && trimmed.contains('-') {
-                    return Some(trimmed.to_string());
-                }
+    // 1. Check .brain strictly in the target directory (no parent directory inheritance)
+    let candidate = ws.join(".brain");
+    if candidate.is_file() {
+        if let Ok(content) = fs::read_to_string(&candidate) {
+            let trimmed = content.trim();
+            if trimmed.len() >= 30 && trimmed.contains('-') {
+                return Some(trimmed.to_string());
             }
-        }
-        match cur.parent() {
-            Some(p) if p != cur => cur = p.to_path_buf(),
-            _ => break,
         }
     }
 
@@ -234,7 +249,10 @@ pub fn set_pin(
         serde_json::Map::new()
     };
 
-    pins.insert(norm_ws, serde_json::Value::String(brain_id.to_string()));
+    pins.insert(
+        norm_ws.clone(),
+        serde_json::Value::String(brain_id.to_string()),
+    );
 
     if let Some(parent) = pins_file.parent() {
         fs::create_dir_all(parent)?;
@@ -243,6 +261,38 @@ pub fn set_pin(
 
     // Also write local .brain
     let _ = fs::write(ws.join(".brain"), format!("{}\n", brain_id.trim()));
+
+    // Link workspace to session's workspace_uris in SQLite if present
+    let target_db = get_db_path(app_dir);
+    if target_db.is_file() {
+        if let Ok(conn) = Connection::open(&target_db) {
+            if let Ok(uris_raw) = conn.query_row(
+                "SELECT workspace_uris FROM conversation_summaries WHERE conversation_id = ?1",
+                rusqlite::params![brain_id.trim()],
+                |r| r.get::<_, String>(0),
+            ) {
+                let mut uri_list: Vec<String> = serde_json::from_str(&uris_raw).unwrap_or_default();
+                let already_linked = uri_list
+                    .iter()
+                    .any(|u| normalize_workspace_path(u) == norm_ws);
+                if !already_linked {
+                    let clean_slash = ws.to_string_lossy().replace('\\', "/");
+                    let file_uri = if clean_slash.starts_with('/') {
+                        format!("file://{}", clean_slash)
+                    } else {
+                        format!("file:///{}", clean_slash)
+                    };
+                    uri_list.push(file_uri);
+                    if let Ok(new_json) = serde_json::to_string(&uri_list) {
+                        let _ = conn.execute(
+                            "UPDATE conversation_summaries SET workspace_uris = ?1 WHERE conversation_id = ?2",
+                            rusqlite::params![new_json, brain_id.trim()],
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     Ok(())
 }
@@ -599,11 +649,7 @@ pub fn fetch_sessions_ext(
         let is_match = if all_workspaces || norm_ws.is_empty() {
             true
         } else {
-            uris.iter().any(|u| {
-                norm_ws == *u
-                    || norm_ws.starts_with(&format!("{}/", u))
-                    || u.starts_with(&format!("{}/", norm_ws))
-            })
+            is_pinned || uris.contains(&norm_ws)
         };
 
         if is_match {
@@ -719,10 +765,7 @@ pub fn resolve_brain_target(
         return Some(t.to_string());
     }
 
-    let mut sessions = fetch_sessions(workspace_path, false, app_dir, None);
-    if sessions.is_empty() {
-        sessions = fetch_sessions(workspace_path, true, app_dir, None);
-    }
+    let sessions = fetch_sessions(workspace_path, false, app_dir, None);
 
     if let Ok(idx) = t.parse::<usize>() {
         if idx < sessions.len() {
@@ -731,7 +774,17 @@ pub fn resolve_brain_target(
         return None;
     }
 
-    // Try prefix match on session ids (including subagents if not in main list)
+    if t == "default" {
+        if let Some(pinned) = get_pinned_id_for_workspace(workspace_path, app_dir) {
+            return Some(pinned);
+        }
+        if let Some(first) = sessions.first() {
+            return Some(first.id.clone());
+        }
+        return None;
+    }
+
+    // Try prefix match on session ids (including subagents/global if explicit prefix given)
     for s in &sessions {
         if s.id.starts_with(t) {
             return Some(s.id.clone());
@@ -741,15 +794,6 @@ pub fn resolve_brain_target(
     for s in &all_with_sub {
         if s.id.starts_with(t) {
             return Some(s.id.clone());
-        }
-    }
-
-    if t == "default" {
-        if let Some(pinned) = get_pinned_id_for_workspace(workspace_path, app_dir) {
-            return Some(pinned);
-        }
-        if let Some(first) = sessions.first() {
-            return Some(first.id.clone());
         }
     }
 
