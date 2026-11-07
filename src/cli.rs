@@ -23,6 +23,14 @@ pub struct Cli {
     )]
     pub target_file: Option<PathBuf>,
 
+    #[arg(
+        short = 's',
+        long = "subagents",
+        global = true,
+        help = "Include background subagent sessions in listings and TUI"
+    )]
+    pub subagents: bool,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }
@@ -95,6 +103,31 @@ pub enum Commands {
 
         #[arg(short, long, help = "Skip interactive confirmation prompt")]
         force: bool,
+    },
+
+    #[command(
+        name = "rename",
+        aliases = ["mv"],
+        about = "Rename a session title in the SQLite database"
+    )]
+    Rename {
+        #[arg(help = "Brain index or UUID to rename")]
+        target: String,
+
+        #[arg(help = "New title for the session")]
+        title: String,
+    },
+
+    #[command(
+        name = "prune",
+        about = "Remove empty/ghost sessions (0 steps and no files) from the database"
+    )]
+    Prune {
+        #[arg(
+            long,
+            help = "List ghost sessions that would be removed without deleting them"
+        )]
+        dry_run: bool,
     },
 
     #[command(about = "Print absolute brain folder path")]

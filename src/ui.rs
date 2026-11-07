@@ -1,4 +1,4 @@
-use crate::core::{ArtifactInfo, BrainStats, SessionSummary};
+use crate::core::{truncate_str, ArtifactInfo, BrainStats, SessionSummary};
 use chrono::{DateTime, Utc};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -23,18 +23,38 @@ pub fn render_preview(
     println!("{CYAN}{BOLD}+------------------------------------------------------------------------+{RESET}\n");
 
     if let Some(s) = session {
-        let tag = if s.pinned {
-            format!("{GREEN}{BOLD}[FIXADO]{RESET} ")
-        } else {
-            String::new()
-        };
+        let mut tags = String::new();
+        if s.pinned {
+            tags.push_str(&format!("{GREEN}{BOLD}[FIXADO]{RESET} "));
+        }
+        if s.is_subagent {
+            tags.push_str(&format!("{MAGENTA}{BOLD}[SUB]{RESET} "));
+        }
         println!("{WHITE}{BOLD}SESSAO{RESET}");
-        println!("  {DIM}Titulo:{RESET}     {BOLD}{}{RESET} {tag}", s.title);
+        println!("  {DIM}Titulo:{RESET}     {BOLD}{}{RESET} {tags}", s.title);
         println!("  {DIM}ID:{RESET}         {CYAN}{}{RESET}", s.id);
         println!(
             "  {DIM}Passos:{RESET}     {YELLOW}{}{RESET} interacoes",
             s.steps
         );
+        if s.is_subagent {
+            if !s.agent_name.is_empty() {
+                println!("  {DIM}Agente:{RESET}     {MAGENTA}{}{RESET}", s.agent_name);
+            }
+            if !s.parent_id.is_empty() {
+                let p_title = s.parent_title.as_deref().unwrap_or("(sessao pai)");
+                println!(
+                    "  {DIM}Sessao Pai:{RESET} {CYAN}{}{RESET} ({})",
+                    truncate_str(&s.parent_id, 11),
+                    p_title
+                );
+            }
+        } else if s.subagent_count > 0 {
+            println!(
+                "  {DIM}Subagentes:{RESET} {CYAN}{} sessoes filhas{RESET}",
+                s.subagent_count
+            );
+        }
         println!("  {DIM}Status:{RESET}     {}", s.status);
         println!("  {DIM}Modificado:{RESET} {}", s.mtime);
         if !s.primary_workspace.is_empty() {
@@ -104,19 +124,16 @@ pub fn render_table(sessions: &[SessionSummary]) {
     for (i, s) in sessions.iter().enumerate() {
         let tag = if s.pinned {
             format!("{GREEN}[FIXADO]{RESET}")
+        } else if s.is_subagent {
+            format!("{MAGENTA}[SUB]   {RESET}")
+        } else if s.subagent_count > 0 {
+            let badge = format!("[+{}sub]", s.subagent_count);
+            format!("{CYAN}{badge:<8}{RESET}")
         } else {
             "        ".to_string()
         };
-        let mut title = s.title.clone();
-        if title.len() > 40 {
-            title.truncate(37);
-            title.push_str("...");
-        }
-        let mut short_id = s.id.clone();
-        if short_id.len() > 8 {
-            short_id.truncate(8);
-            short_id.push_str("...");
-        }
+        let title = truncate_str(&s.title, 40);
+        let short_id = truncate_str(&s.id, 11);
         let steps_str = format!("{} p.", s.steps);
         let mtime_str = if s.mtime.len() >= 10 {
             &s.mtime[..10]

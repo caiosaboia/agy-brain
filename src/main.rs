@@ -10,8 +10,9 @@ use std::process::ExitCode;
 
 use cli::{Cli, Commands};
 use core::{
-    delete_session, fetch_sessions, get_brain_root, get_brain_stats, get_db_path,
-    get_default_app_dir, get_pinned_id_for_workspace, remove_pin, resolve_brain_target, set_pin,
+    delete_session, fetch_sessions_ext, get_brain_root, get_brain_stats, get_db_path,
+    get_default_app_dir, get_pinned_id_for_workspace, prune_sessions, remove_pin, rename_session,
+    resolve_brain_target, set_pin,
 };
 use shells::{get_shell_integration, install_shell_integration};
 use tui::{run_interactive_tui, TuiAction};
@@ -54,10 +55,13 @@ fn run_doctor(app_dir: Option<&Path>) {
             "  {GREEN}[OK]{RESET} Banco de dados SQLite: {}",
             db_file.display()
         );
-        let sessions = fetch_sessions(None, true, Some(&target_app), None);
+        let root_sessions = fetch_sessions_ext(None, true, false, Some(&target_app), None);
+        let all_sessions = fetch_sessions_ext(None, true, true, Some(&target_app), None);
+        let sub_count = all_sessions.len().saturating_sub(root_sessions.len());
         println!(
-            "  {GREEN}[OK]{RESET} Total de sessoes registradas: {}",
-            sessions.len()
+            "  {GREEN}[OK]{RESET} Sessoes principais: {} (Subagentes: {})",
+            root_sessions.len(),
+            sub_count
         );
     } else {
         println!(
@@ -97,12 +101,13 @@ fn main() -> ExitCode {
 
     match args.command {
         None | Some(Commands::Tui) => {
-            let mut sessions = fetch_sessions(Some(&cur_ws), false, app_dir, None);
+            let mut sessions =
+                fetch_sessions_ext(Some(&cur_ws), false, args.subagents, app_dir, None);
             if sessions.is_empty() {
-                sessions = fetch_sessions(Some(&cur_ws), true, app_dir, None);
+                sessions = fetch_sessions_ext(Some(&cur_ws), true, args.subagents, app_dir, None);
             }
 
-            match run_interactive_tui(sessions, &cur_ws, app_dir) {
+            match run_interactive_tui(sessions, &cur_ws, app_dir, args.subagents) {
                 Ok(TuiAction::Navigate(path)) => {
                     if let Some(tf) = &args.target_file {
                         let _ = std::fs::write(tf, path.to_string_lossy().as_bytes());
@@ -140,7 +145,7 @@ fn main() -> ExitCode {
         }
 
         Some(Commands::List { all }) => {
-            let sessions = fetch_sessions(Some(&cur_ws), all, app_dir, None);
+            let sessions = fetch_sessions_ext(Some(&cur_ws), all, args.subagents, app_dir, None);
             render_table(&sessions);
             ExitCode::SUCCESS
         }
@@ -153,12 +158,56 @@ fn main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            let sessions = fetch_sessions(Some(&cur_ws), true, app_dir, None);
+            let sessions = fetch_sessions_ext(Some(&cur_ws), true, true, app_dir, None);
             let session = sessions.iter().find(|s| s.id == bid);
             let stats = get_brain_stats(&bid, app_dir);
             render_preview(session, stats.as_ref(), &bid);
             ExitCode::SUCCESS
         }
+
+        Some(Commands::Rename { target, title }) => {
+            match rename_session(&target, &title, Some(&cur_ws), app_dir, None) {
+                Ok((resolved_id, saved_title)) => {
+                    println!(
+                        "{GREEN}[OK] Sessao {resolved_id} renomeada para: \"{saved_title}\"{RESET}"
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(err) => {
+                    eprintln!("{RED}[!] Erro ao renomear sessao: {err}{RESET}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+
+        Some(Commands::Prune { dry_run }) => match prune_sessions(dry_run, app_dir, None) {
+            Ok(pruned) => {
+                if pruned.is_empty() {
+                    println!("{GREEN}[OK] Nenhuma sessao fantasma encontrada.{RESET}");
+                } else if dry_run {
+                    println!(
+                        "{YELLOW}[DRY-RUN] {} sessoes fantasmas seriam removidas:{RESET}",
+                        pruned.len()
+                    );
+                    for p in &pruned {
+                        println!("  - {} ({} passos, {})", p.id, p.steps, p.mtime);
+                    }
+                } else {
+                    println!(
+                        "{GREEN}[OK] {} sessoes fantasmas removidas com sucesso:{RESET}",
+                        pruned.len()
+                    );
+                    for p in &pruned {
+                        println!("  - {}", p.id);
+                    }
+                }
+                ExitCode::SUCCESS
+            }
+            Err(err) => {
+                eprintln!("{RED}[!] Erro ao limpar sessoes fantasmas: {err}{RESET}");
+                ExitCode::FAILURE
+            }
+        },
 
         Some(Commands::Artifacts { target }) => {
             let bid = match resolve_brain_target(target.as_deref(), Some(&cur_ws), app_dir) {

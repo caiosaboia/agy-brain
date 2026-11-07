@@ -1,5 +1,6 @@
 use crate::core::{
-    delete_session, get_brain_root, get_brain_stats, set_pin, BrainStats, SessionSummary,
+    delete_session, fetch_sessions_ext, get_brain_root, get_brain_stats, rename_session, set_pin,
+    truncate_str, BrainStats, SessionSummary,
 };
 use crate::ui::{open_in_file_manager, open_in_neovim};
 use chrono::{DateTime, Utc};
@@ -39,15 +40,23 @@ struct AppState {
     search_query: String,
     list_state: ListState,
     all_mode: bool,
+    show_subagents: bool,
     workspace: PathBuf,
     app_dir: Option<PathBuf>,
     confirm_delete: bool,
     delete_modal_focus: DeleteModalFocus,
     modal_rect: Option<Rect>,
+    renaming: bool,
+    rename_input: String,
 }
 
 impl AppState {
-    fn new(sessions: Vec<SessionSummary>, workspace: PathBuf, app_dir: Option<PathBuf>) -> Self {
+    fn new(
+        sessions: Vec<SessionSummary>,
+        workspace: PathBuf,
+        app_dir: Option<PathBuf>,
+        show_subagents: bool,
+    ) -> Self {
         let indices: Vec<usize> = (0..sessions.len()).collect();
         let mut list_state = ListState::default();
         if !indices.is_empty() {
@@ -59,11 +68,14 @@ impl AppState {
             search_query: String::new(),
             list_state,
             all_mode: false,
+            show_subagents,
             workspace,
             app_dir,
             confirm_delete: false,
             delete_modal_focus: DeleteModalFocus::Cancel,
             modal_rect: None,
+            renaming: false,
+            rename_input: String::new(),
         }
     }
 
@@ -131,6 +143,7 @@ pub fn run_interactive_tui(
     sessions: Vec<SessionSummary>,
     workspace: &Path,
     app_dir: Option<&Path>,
+    show_subagents: bool,
 ) -> io::Result<TuiAction> {
     enable_raw_mode()?;
     let mut stderr_handle = stderr();
@@ -142,6 +155,7 @@ pub fn run_interactive_tui(
         sessions,
         workspace.to_path_buf(),
         app_dir.map(|p| p.to_path_buf()),
+        show_subagents,
     );
 
     let res = main_loop(&mut terminal, &mut state);
@@ -274,6 +288,50 @@ fn main_loop<B: ratatui::backend::Backend>(
                 continue;
             }
 
+            if state.renaming {
+                match (key.modifiers, key.code) {
+                    (KeyModifiers::NONE, KeyCode::Esc) => {
+                        state.renaming = false;
+                        state.rename_input.clear();
+                    }
+                    (KeyModifiers::NONE, KeyCode::Enter) => {
+                        let new_title = state.rename_input.trim().to_string();
+                        if !new_title.is_empty() {
+                            if let Some(session) = state.selected_session() {
+                                let target_id = session.id.clone();
+                                if let Ok((_, saved_title)) = rename_session(
+                                    &target_id,
+                                    &new_title,
+                                    Some(&state.workspace),
+                                    state.app_dir.as_deref(),
+                                    None,
+                                ) {
+                                    for s in &mut state.all_sessions {
+                                        if s.id == target_id {
+                                            s.title = saved_title.clone();
+                                            s.title_source = "title".to_string();
+                                        }
+                                        if s.parent_id == target_id {
+                                            s.parent_title = Some(saved_title.clone());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        state.renaming = false;
+                        state.rename_input.clear();
+                    }
+                    (KeyModifiers::NONE, KeyCode::Backspace) => {
+                        state.rename_input.pop();
+                    }
+                    (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+                        state.rename_input.push(c);
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+
             match (key.modifiers, key.code) {
                 (KeyModifiers::NONE, KeyCode::Esc) => {
                     return Ok(TuiAction::Exit);
@@ -304,6 +362,12 @@ fn main_loop<B: ratatui::backend::Backend>(
                         for s in &mut state.all_sessions {
                             s.pinned = s.id == cur_id;
                         }
+                    }
+                }
+                (KeyModifiers::CONTROL, KeyCode::Char('r')) => {
+                    if let Some(session) = state.selected_session() {
+                        state.rename_input = session.title.clone();
+                        state.renaming = true;
                     }
                 }
                 (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
@@ -339,9 +403,21 @@ fn main_loop<B: ratatui::backend::Backend>(
                 }
                 (KeyModifiers::CONTROL, KeyCode::Char('a')) => {
                     state.all_mode = !state.all_mode;
-                    state.all_sessions = crate::core::fetch_sessions(
+                    state.all_sessions = fetch_sessions_ext(
                         Some(&state.workspace),
                         state.all_mode,
+                        state.show_subagents,
+                        state.app_dir.as_deref(),
+                        None,
+                    );
+                    state.filter_sessions();
+                }
+                (KeyModifiers::CONTROL, KeyCode::Char('s')) => {
+                    state.show_subagents = !state.show_subagents;
+                    state.all_sessions = fetch_sessions_ext(
+                        Some(&state.workspace),
+                        state.all_mode,
+                        state.show_subagents,
                         state.app_dir.as_deref(),
                         None,
                     );
@@ -379,11 +455,16 @@ fn ui(f: &mut Frame, state: &mut AppState) {
 
     // 1. Search Header
     let mode_tag = if state.all_mode {
-        " [MODO: TODOS OS PROJETOS] "
+        " [MODO: TODOS OS PROJETOS]"
     } else {
-        " [PROJETO ATUAL] "
+        " [PROJETO ATUAL]"
     };
-    let search_title = format!(" Antigravity Brain Navigator{} ", mode_tag);
+    let sub_tag = if state.show_subagents {
+        " [SUBAGENTES: VISIVEIS] "
+    } else {
+        " "
+    };
+    let search_title = format!(" Antigravity Brain Navigator{}{} ", mode_tag, sub_tag);
     let search_bar = Paragraph::new(Line::from(vec![
         Span::styled(
             " Buscar: ",
@@ -419,20 +500,25 @@ fn ui(f: &mut Frame, state: &mut AppState) {
         .iter()
         .map(|&idx| {
             let s = &state.all_sessions[idx];
-            let tag = if s.pinned { "[FIXADO] " } else { "         " };
-            let steps = format!("{:>5} p.", s.steps);
-            let title = if s.title.len() > 28 {
-                format!("{}...", &s.title[..25])
+            let (tag, tag_color) = if s.pinned {
+                ("[FIXADO] ".to_string(), Color::Green)
+            } else if s.is_subagent {
+                ("[SUB]    ".to_string(), Color::Magenta)
+            } else if s.subagent_count > 0 {
+                (
+                    format!("{:<9}", format!("[+{}sub]", s.subagent_count)),
+                    Color::Cyan,
+                )
             } else {
-                s.title.clone()
+                ("         ".to_string(), Color::Green)
             };
+            let steps = format!("{:>5} p.", s.steps);
+            let title = truncate_str(&s.title, 28);
 
             let line = Line::from(vec![
                 Span::styled(
                     tag,
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(tag_color).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(format!("{:<28} ", title), Style::default().fg(Color::White)),
                 Span::styled(steps, Style::default().fg(Color::Yellow)),
@@ -479,23 +565,31 @@ fn ui(f: &mut Frame, state: &mut AppState) {
                 .bg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(" Navegar  "),
+        Span::raw(" Ir "),
         Span::styled(
-            " [Ctrl+E / F2] ",
+            " [Ctrl+E/F2] ",
             Style::default()
                 .fg(Color::Black)
                 .bg(Color::Rgb(80, 220, 140))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(" Neovim  "),
+        Span::raw(" Nvim "),
         Span::styled(
-            " [Ctrl+O] ",
+            " [Ctrl+R] ",
             Style::default()
                 .fg(Color::Black)
-                .bg(Color::Yellow)
+                .bg(Color::Rgb(120, 180, 255))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(" Explorer  "),
+        Span::raw(" Renomear "),
+        Span::styled(
+            " [Ctrl+S] ",
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Rgb(200, 140, 255))
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" Subagentes "),
         Span::styled(
             " [Ctrl+P] ",
             Style::default()
@@ -503,7 +597,7 @@ fn ui(f: &mut Frame, state: &mut AppState) {
                 .bg(Color::Green)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(" Fixar  "),
+        Span::raw(" Fixar "),
         Span::styled(
             " [Ctrl+D] ",
             Style::default()
@@ -511,7 +605,7 @@ fn ui(f: &mut Frame, state: &mut AppState) {
                 .bg(Color::Red)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(" Apagar  "),
+        Span::raw(" Apagar "),
         Span::styled(
             " [Ctrl+A] ",
             Style::default()
@@ -519,9 +613,9 @@ fn ui(f: &mut Frame, state: &mut AppState) {
                 .bg(Color::Magenta)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(" Todos  "),
+        Span::raw(" Todos "),
         Span::styled(
-            " [Esc/q] ",
+            " [Esc] ",
             Style::default().fg(Color::White).bg(Color::DarkGray),
         ),
         Span::raw(" Sair"),
@@ -529,7 +623,66 @@ fn ui(f: &mut Frame, state: &mut AppState) {
     .block(Block::default().borders(Borders::ALL).title(" Atalhos "));
     f.render_widget(footer, chunks[2]);
 
-    if state.confirm_delete {
+    if state.renaming {
+        let area = centered_rect(65, 25, f.area());
+        f.render_widget(Clear, area);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan))
+            .title(Span::styled(
+                " RENOMEAR SESSAO ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ));
+
+        let selected_id = state
+            .selected_session()
+            .map(|s| s.id.as_str())
+            .unwrap_or("");
+
+        let text = vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("ID: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(selected_id, Style::default().fg(Color::DarkGray)),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled(
+                    "Novo Titulo: ",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    &state.rename_input,
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "_",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::SLOW_BLINK),
+                ),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("[Enter] ", Style::default().fg(Color::Green)),
+                Span::raw("Salvar no SQLite | "),
+                Span::styled("[Esc] ", Style::default().fg(Color::Red)),
+                Span::raw("Cancelar"),
+            ]),
+        ];
+
+        let p = Paragraph::new(text)
+            .block(block)
+            .alignment(ratatui::layout::Alignment::Center);
+        f.render_widget(p, area);
+    } else if state.confirm_delete {
         let area = centered_rect(65, 30, f.area());
         state.modal_rect = Some(area);
         f.render_widget(Clear, area);
@@ -666,6 +819,7 @@ fn render_tui_preview<'a>(
 
     if let Some(s) = session {
         let pin_badge = if s.pinned { " [FIXADO]" } else { "" };
+        let sub_badge = if s.is_subagent { " [SUBAGENTE]" } else { "" };
         text_lines.push(Line::from(vec![
             Span::styled(
                 "SESSAO: ",
@@ -685,6 +839,12 @@ fn render_tui_preview<'a>(
                     .fg(Color::Green)
                     .add_modifier(Modifier::BOLD),
             ),
+            Span::styled(
+                sub_badge,
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]));
         text_lines.push(Line::from(vec![
             Span::styled("  ID:         ", Style::default().fg(Color::DarkGray)),
@@ -697,6 +857,32 @@ fn render_tui_preview<'a>(
                 Style::default().fg(Color::Yellow),
             ),
         ]));
+        if s.is_subagent {
+            if !s.agent_name.is_empty() {
+                text_lines.push(Line::from(vec![
+                    Span::styled("  Agente:     ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(&s.agent_name, Style::default().fg(Color::Magenta)),
+                ]));
+            }
+            if !s.parent_id.is_empty() {
+                let p_title = s.parent_title.as_deref().unwrap_or("(sessao pai)");
+                text_lines.push(Line::from(vec![
+                    Span::styled("  Sessao Pai: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        format!("{} ({})", truncate_str(&s.parent_id, 11), p_title),
+                        Style::default().fg(Color::Cyan),
+                    ),
+                ]));
+            }
+        } else if s.subagent_count > 0 {
+            text_lines.push(Line::from(vec![
+                Span::styled("  Subagentes: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("{} sessoes filhas", s.subagent_count),
+                    Style::default().fg(Color::Cyan),
+                ),
+            ]));
+        }
         text_lines.push(Line::from(vec![
             Span::styled("  Status:     ", Style::default().fg(Color::DarkGray)),
             Span::raw(&s.status),

@@ -7,8 +7,9 @@ use tempfile::tempdir;
 mod core;
 
 use core::{
-    delete_session, fetch_sessions, get_brain_stats, get_pinned_id_for_workspace,
-    normalize_workspace_path, remove_pin, resolve_brain_target, set_pin,
+    delete_session, extract_role_from_raw_summary, fetch_sessions, fetch_sessions_ext,
+    get_brain_stats, get_pinned_id_for_workspace, normalize_workspace_path, prune_sessions,
+    remove_pin, rename_session, resolve_brain_target, set_pin,
 };
 
 #[test]
@@ -254,4 +255,147 @@ fn test_delete_session() {
 
     // Verify pin was removed
     assert!(!ws_dir.join(".brain").exists());
+}
+
+#[test]
+fn test_extract_role_from_raw_summary() {
+    let mut raw = Vec::new();
+    raw.extend_from_slice(
+        b"prefix_bytes_B-\n\x04self\x12\x1eWorkspace Parity UI Specialist8\xa6\n",
+    );
+    let role = extract_role_from_raw_summary(&raw, "self");
+    assert_eq!(role, Some("Workspace Parity UI Specialist".to_string()));
+
+    // Also works when agent_name is empty by scanning for the B..\n..\x12 pattern
+    let role_auto = extract_role_from_raw_summary(&raw, "");
+    assert_eq!(
+        role_auto,
+        Some("Workspace Parity UI Specialist".to_string())
+    );
+}
+
+#[test]
+fn test_title_cascade_subagents_and_prune() {
+    let tmp = tempdir().unwrap();
+    let app_dir = tmp.path().join("agy_home");
+    fs::create_dir_all(&app_dir).unwrap();
+    let db_path = app_dir.join("conversation_summaries.db");
+
+    let conn = Connection::open(&db_path).unwrap();
+    conn.execute(
+        "CREATE TABLE conversation_summaries (
+            conversation_id text PRIMARY KEY,
+            title text NOT NULL DEFAULT '',
+            preview text NOT NULL DEFAULT '',
+            step_count integer NOT NULL DEFAULT 0,
+            last_modified_time datetime NOT NULL,
+            workspace_uris text NOT NULL,
+            status text NOT NULL DEFAULT '',
+            agent_name text NOT NULL DEFAULT '',
+            parent_conversation_id text NOT NULL DEFAULT '',
+            nesting_depth integer NOT NULL DEFAULT 0,
+            raw_summary BLOB
+        )",
+        [],
+    )
+    .unwrap();
+
+    // 1. Root session with preview only (title = '')
+    conn.execute(
+        "INSERT INTO conversation_summaries VALUES
+        ('root-1111-1111-1111-111111111111', '', 'Extracao de Dados Pipefy CSV\nLinha extra', 500, '2026-11-05 12:00:00', '[\"file:///C:/Users/dev/repo\"]', 'IDLE', '', '', 0, NULL)",
+        [],
+    ).unwrap();
+
+    // 2. Subagent child of root-1111 with Role inside raw_summary blob
+    let raw_blob: Vec<u8> = b"headerB)\n\x04self\x12\x1aCLI Doublecheck Specialistfooter".to_vec();
+    conn.execute(
+        "INSERT INTO conversation_summaries VALUES
+        ('sub-2222-2222-2222-222222222222', '', '', 80, '2026-11-05 12:30:00', '[\"file:///C:/Users/dev/repo\"]', 'IDLE', 'self', 'root-1111-1111-1111-111111111111', 1, ?1)",
+        rusqlite::params![raw_blob],
+    ).unwrap();
+
+    // 3. Root session with transcript fallback
+    let trans_id = "root-3333-3333-3333-333333333333";
+    let logs_dir = app_dir
+        .join("brain")
+        .join(trans_id)
+        .join(".system_generated")
+        .join("logs");
+    fs::create_dir_all(&logs_dir).unwrap();
+    fs::write(
+        logs_dir.join("transcript.jsonl"),
+        "{\"type\":\"USER_INPUT\",\"content\":\"<USER_REQUEST>\\nConfigurar ambiente Rust\\n</USER_REQUEST>\"}\n",
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO conversation_summaries VALUES
+        (?1, '', '', 25, '2026-11-05 13:00:00', '[\"file:///C:/Users/dev/repo\"]', 'IDLE', '', '', 0, NULL)",
+        rusqlite::params![trans_id],
+    ).unwrap();
+
+    // 4. Ghost session (0 steps, no files)
+    let ghost_id = "ghost-4444-4444-4444-444444444444";
+    fs::create_dir_all(app_dir.join("brain").join(ghost_id)).unwrap();
+    conn.execute(
+        "INSERT INTO conversation_summaries VALUES
+        (?1, '', '', 0, '0001-01-01 00:00:00', '[\"file:///C:/Users/dev/repo\"]', '', '', '', 0, NULL)",
+        rusqlite::params![ghost_id],
+    ).unwrap();
+    drop(conn);
+
+    let ws = PathBuf::from("C:/Users/dev/repo");
+
+    // Default fetch: hides subagent and ghost session
+    let root_sessions = fetch_sessions(Some(&ws), false, Some(&app_dir), Some(&db_path));
+    assert_eq!(root_sessions.len(), 2);
+    assert_eq!(root_sessions[0].id, "root-1111-1111-1111-111111111111");
+    assert_eq!(root_sessions[0].title, "Extracao de Dados Pipefy CSV");
+    assert_eq!(root_sessions[0].title_source, "preview");
+    assert_eq!(root_sessions[0].subagent_count, 1);
+
+    assert_eq!(root_sessions[1].id, trans_id);
+    assert_eq!(root_sessions[1].title, "Configurar ambiente Rust");
+    assert_eq!(root_sessions[1].title_source, "transcript");
+
+    // Fetch including subagents
+    let all_with_sub = fetch_sessions_ext(Some(&ws), false, true, Some(&app_dir), Some(&db_path));
+    assert_eq!(all_with_sub.len(), 3);
+    let sub = all_with_sub
+        .iter()
+        .find(|s| s.id == "sub-2222-2222-2222-222222222222")
+        .unwrap();
+    assert!(sub.is_subagent);
+    assert_eq!(sub.title, "CLI Doublecheck Specialist");
+    assert_eq!(sub.title_source, "raw_summary");
+    assert_eq!(
+        sub.parent_title.as_deref(),
+        Some("Extracao de Dados Pipefy CSV")
+    );
+
+    // Rename session
+    let (renamed_id, new_title) = rename_session(
+        "root-1111-1111-1111-111111111111",
+        "Pipeline Pipefy Oficial",
+        Some(&ws),
+        Some(&app_dir),
+        Some(&db_path),
+    )
+    .unwrap();
+    assert_eq!(renamed_id, "root-1111-1111-1111-111111111111");
+    assert_eq!(new_title, "Pipeline Pipefy Oficial");
+
+    let updated = fetch_sessions(Some(&ws), false, Some(&app_dir), Some(&db_path));
+    assert_eq!(updated[0].title, "Pipeline Pipefy Oficial");
+    assert_eq!(updated[0].title_source, "title");
+
+    // Prune ghost sessions (dry_run first, then actual)
+    let dry = prune_sessions(true, Some(&app_dir), Some(&db_path)).unwrap();
+    assert_eq!(dry.len(), 1);
+    assert_eq!(dry[0].id, ghost_id);
+    assert!(app_dir.join("brain").join(ghost_id).exists());
+
+    let pruned = prune_sessions(false, Some(&app_dir), Some(&db_path)).unwrap();
+    assert_eq!(pruned.len(), 1);
+    assert!(!app_dir.join("brain").join(ghost_id).exists());
 }

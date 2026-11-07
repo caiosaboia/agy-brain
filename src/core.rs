@@ -1,6 +1,8 @@
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,6 +15,20 @@ pub struct SessionSummary {
     pub primary_workspace: String,
     pub status: String,
     pub pinned: bool,
+    pub is_subagent: bool,
+    pub agent_name: String,
+    pub parent_id: String,
+    pub parent_title: Option<String>,
+    pub nesting_depth: i64,
+    pub subagent_count: usize,
+    pub title_source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrunedSession {
+    pub id: String,
+    pub steps: i64,
+    pub mtime: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -265,9 +281,234 @@ pub fn remove_pin(workspace_path: Option<&Path>, app_dir: Option<&Path>) -> bool
     removed
 }
 
+pub fn truncate_str(s: &str, max_chars: usize) -> String {
+    let char_count = s.chars().count();
+    if char_count <= max_chars {
+        return s.to_string();
+    }
+    if max_chars <= 3 {
+        return s.chars().take(max_chars).collect();
+    }
+    let prefix: String = s.chars().take(max_chars - 3).collect();
+    format!("{}...", prefix)
+}
+
+pub fn clean_single_line(s: &str, max_chars: usize) -> String {
+    let first_line = s
+        .lines()
+        .map(|l| l.trim().trim_start_matches('#').trim())
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
+    let collapsed = first_line.split_whitespace().collect::<Vec<_>>().join(" ");
+    truncate_str(&collapsed, max_chars)
+}
+
+pub fn extract_role_from_raw_summary(raw: &[u8], agent_name: &str) -> Option<String> {
+    if !agent_name.is_empty() && agent_name.len() < 128 {
+        let mut needle = Vec::with_capacity(agent_name.len() + 3);
+        needle.push(b'\n');
+        needle.push(agent_name.len() as u8);
+        needle.extend_from_slice(agent_name.as_bytes());
+        needle.push(0x12);
+
+        if let Some(pos) = raw.windows(needle.len()).position(|w| w == needle) {
+            let len_idx = pos + needle.len();
+            if let Some(&role_len_byte) = raw.get(len_idx) {
+                let role_len = role_len_byte as usize;
+                if role_len > 0 && len_idx + 1 + role_len <= raw.len() {
+                    if let Ok(role_str) =
+                        std::str::from_utf8(&raw[len_idx + 1..len_idx + 1 + role_len])
+                    {
+                        let trimmed = role_str.trim();
+                        if !trimmed.is_empty() {
+                            return Some(trimmed.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback scan for Protobuf field 8 (`B` + len + `\n` + ag_len + ag + `\x12` + role_len + role)
+    for i in 0..raw.len().saturating_sub(6) {
+        if raw[i] == b'B' && raw.get(i + 2) == Some(&b'\n') {
+            let ag_len = raw[i + 3] as usize;
+            let sep_idx = i + 4 + ag_len;
+            if ag_len > 0 && ag_len < 64 && raw.get(sep_idx) == Some(&0x12) {
+                if let Some(&role_len_byte) = raw.get(sep_idx + 1) {
+                    let role_len = role_len_byte as usize;
+                    let start = sep_idx + 2;
+                    if role_len > 0 && role_len < 128 && start + role_len <= raw.len() {
+                        if let Ok(role_str) = std::str::from_utf8(&raw[start..start + role_len]) {
+                            let trimmed = role_str.trim();
+                            if !trimmed.is_empty() && trimmed.chars().all(|c| !c.is_control()) {
+                                return Some(trimmed.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn extract_title_from_transcript(brain_root: &Path, cid: &str) -> Option<String> {
+    let trans_path = brain_root
+        .join(cid)
+        .join(".system_generated")
+        .join("logs")
+        .join("transcript.jsonl");
+    let file = fs::File::open(trans_path).ok()?;
+    let reader = BufReader::new(file);
+
+    for line in reader.lines().take(40).flatten() {
+        if !line.contains("USER_INPUT") {
+            continue;
+        }
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
+            if val.get("type").and_then(|v| v.as_str()) == Some("USER_INPUT") {
+                if let Some(content) = val.get("content").and_then(|v| v.as_str()) {
+                    let mut slice = content;
+                    if let Some(start) = slice.find("<USER_REQUEST>") {
+                        slice = &slice[start + "<USER_REQUEST>".len()..];
+                        if let Some(end) = slice.find("</USER_REQUEST>") {
+                            slice = &slice[..end];
+                        }
+                    }
+                    let cleaned = clean_single_line(slice, 100);
+                    if !cleaned.is_empty() {
+                        return Some(cleaned);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn brain_has_files(brain_root: &Path, cid: &str) -> bool {
+    let dir = brain_root.join(cid);
+    if !dir.is_dir() {
+        return false;
+    }
+    walkdir::WalkDir::new(dir)
+        .max_depth(4)
+        .into_iter()
+        .flatten()
+        .any(|e| e.file_type().is_file())
+}
+
+pub fn resolve_session_title(
+    title: &str,
+    preview: &str,
+    raw_summary: Option<&[u8]>,
+    agent_name: &str,
+    brain_root: &Path,
+    cid: &str,
+) -> (String, String) {
+    if !title.trim().is_empty() {
+        return (clean_single_line(title, 100), "title".to_string());
+    }
+    if !preview.trim().is_empty() {
+        return (clean_single_line(preview, 100), "preview".to_string());
+    }
+    if let Some(raw) = raw_summary {
+        if let Some(role) = extract_role_from_raw_summary(raw, agent_name) {
+            return (clean_single_line(&role, 100), "raw_summary".to_string());
+        }
+    }
+    if let Some(trans_title) = extract_title_from_transcript(brain_root, cid) {
+        return (trans_title, "transcript".to_string());
+    }
+    ("(sem titulo)".to_string(), "empty".to_string())
+}
+
+struct RawRow {
+    cid: String,
+    title: String,
+    preview: String,
+    steps: i64,
+    mtime: String,
+    uris_raw: String,
+    status: String,
+    agent_name: String,
+    parent_id: String,
+    nesting_depth: i64,
+    raw_summary: Option<Vec<u8>>,
+}
+
+fn read_all_raw_rows(conn: &Connection) -> Vec<RawRow> {
+    let full_query = "
+        SELECT conversation_id, title, preview, step_count, last_modified_time, workspace_uris, status,
+               agent_name, parent_conversation_id, nesting_depth, raw_summary
+        FROM conversation_summaries
+        ORDER BY step_count DESC, last_modified_time DESC
+    ";
+
+    if let Ok(mut stmt) = conn.prepare(full_query) {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok(RawRow {
+                cid: row.get(0)?,
+                title: row.get(1).unwrap_or_default(),
+                preview: row.get(2).unwrap_or_default(),
+                steps: row.get(3).unwrap_or(0),
+                mtime: row.get(4).unwrap_or_default(),
+                uris_raw: row.get(5).unwrap_or_default(),
+                status: row.get(6).unwrap_or_default(),
+                agent_name: row.get(7).unwrap_or_default(),
+                parent_id: row.get(8).unwrap_or_default(),
+                nesting_depth: row.get(9).unwrap_or(0),
+                raw_summary: row.get(10).ok(),
+            })
+        }) {
+            return rows.flatten().collect();
+        }
+    }
+
+    let fallback_query = "
+        SELECT conversation_id, title, preview, step_count, last_modified_time, workspace_uris, status
+        FROM conversation_summaries
+        ORDER BY step_count DESC, last_modified_time DESC
+    ";
+
+    if let Ok(mut stmt) = conn.prepare(fallback_query) {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok(RawRow {
+                cid: row.get(0)?,
+                title: row.get(1).unwrap_or_default(),
+                preview: row.get(2).unwrap_or_default(),
+                steps: row.get(3).unwrap_or(0),
+                mtime: row.get(4).unwrap_or_default(),
+                uris_raw: row.get(5).unwrap_or_default(),
+                status: row.get(6).unwrap_or_default(),
+                agent_name: String::new(),
+                parent_id: String::new(),
+                nesting_depth: 0,
+                raw_summary: None,
+            })
+        }) {
+            return rows.flatten().collect();
+        }
+    }
+
+    Vec::new()
+}
+
 pub fn fetch_sessions(
     workspace_path: Option<&Path>,
     all_workspaces: bool,
+    app_dir: Option<&Path>,
+    db_path: Option<&Path>,
+) -> Vec<SessionSummary> {
+    fetch_sessions_ext(workspace_path, all_workspaces, false, app_dir, db_path)
+}
+
+pub fn fetch_sessions_ext(
+    workspace_path: Option<&Path>,
+    all_workspaces: bool,
+    include_subagents: bool,
     app_dir: Option<&Path>,
     db_path: Option<&Path>,
 ) -> Vec<SessionSummary> {
@@ -292,79 +533,109 @@ pub fn fetch_sessions(
         .map(|p| normalize_workspace_path(&p.to_string_lossy()))
         .unwrap_or_default();
     let pinned_id = get_pinned_id_for_workspace(workspace_path, app_dir);
+    let brain_root = get_brain_root(app_dir);
 
-    let query = "
-        SELECT conversation_id, title, step_count, last_modified_time, workspace_uris, status
-        FROM conversation_summaries
-        ORDER BY step_count DESC, last_modified_time DESC
-    ";
+    let raw_rows = read_all_raw_rows(&conn);
 
-    let mut stmt = match conn.prepare(query) {
-        Ok(s) => s,
-        Err(_) => return Vec::new(),
-    };
+    let mut subagent_counts: HashMap<String, usize> = HashMap::new();
+    let mut title_map: HashMap<String, String> = HashMap::new();
 
-    let rows = stmt.query_map([], |row| {
-        let cid: String = row.get(0)?;
-        let title: String = row.get(1).unwrap_or_default();
-        let steps: i64 = row.get(2).unwrap_or(0);
-        let mtime: String = row.get(3).unwrap_or_default();
-        let uris_raw: String = row.get(4).unwrap_or_default();
-        let status: String = row.get(5).unwrap_or_default();
-        Ok((cid, title, steps, mtime, uris_raw, status))
-    });
+    for r in &raw_rows {
+        let is_sub = r.nesting_depth > 0 || !r.parent_id.is_empty();
+        if is_sub && !r.parent_id.is_empty() {
+            *subagent_counts.entry(r.parent_id.clone()).or_insert(0) += 1;
+        }
+        let (res_title, _) = resolve_session_title(
+            &r.title,
+            &r.preview,
+            r.raw_summary.as_deref(),
+            &r.agent_name,
+            &brain_root,
+            &r.cid,
+        );
+        title_map.insert(r.cid.clone(), res_title);
+    }
 
     let mut results = Vec::new();
-    if let Ok(mapped) = rows {
-        for item in mapped.flatten() {
-            let (cid, title, steps, mtime, uris_raw, status) = item;
+    for r in raw_rows {
+        let is_subagent = r.nesting_depth > 0 || !r.parent_id.is_empty();
+        if is_subagent && !include_subagents {
+            continue;
+        }
 
-            let uris: Vec<String> =
-                if let Ok(parsed) = serde_json::from_str::<Vec<String>>(&uris_raw) {
-                    parsed
-                        .into_iter()
-                        .map(|u| normalize_workspace_path(&u))
-                        .collect()
-                } else if !uris_raw.is_empty() {
-                    vec![normalize_workspace_path(&uris_raw)]
-                } else {
-                    Vec::new()
-                };
+        let (resolved_title, title_source) = resolve_session_title(
+            &r.title,
+            &r.preview,
+            r.raw_summary.as_deref(),
+            &r.agent_name,
+            &brain_root,
+            &r.cid,
+        );
 
-            let primary_ws = uris.first().cloned().unwrap_or_default();
+        let is_pinned = pinned_id.as_deref() == Some(&r.cid);
 
-            let is_match = if all_workspaces || norm_ws.is_empty() {
-                true
+        // Filter ghost sessions (0 steps or no title/content AND no files in brain folder)
+        if !is_pinned
+            && !brain_has_files(&brain_root, &r.cid)
+            && (r.steps == 0 || title_source == "empty")
+        {
+            continue;
+        }
+
+        let uris: Vec<String> = if let Ok(parsed) = serde_json::from_str::<Vec<String>>(&r.uris_raw)
+        {
+            parsed
+                .into_iter()
+                .map(|u| normalize_workspace_path(&u))
+                .collect()
+        } else if !r.uris_raw.is_empty() {
+            vec![normalize_workspace_path(&r.uris_raw)]
+        } else {
+            Vec::new()
+        };
+
+        let primary_ws = uris.first().cloned().unwrap_or_default();
+
+        let is_match = if all_workspaces || norm_ws.is_empty() {
+            true
+        } else {
+            uris.iter().any(|u| {
+                norm_ws == *u
+                    || norm_ws.starts_with(&format!("{}/", u))
+                    || u.starts_with(&format!("{}/", norm_ws))
+            })
+        };
+
+        if is_match {
+            let clean_mtime = if r.mtime.len() >= 19 {
+                r.mtime[..19].replace('T', " ")
             } else {
-                uris.iter().any(|u| {
-                    norm_ws == *u
-                        || norm_ws.starts_with(&format!("{}/", u))
-                        || u.starts_with(&format!("{}/", norm_ws))
-                })
+                r.mtime
             };
+            let parent_title = if !r.parent_id.is_empty() {
+                title_map.get(&r.parent_id).cloned()
+            } else {
+                None
+            };
+            let subagent_count = subagent_counts.get(&r.cid).copied().unwrap_or(0);
 
-            if is_match {
-                let is_pinned = pinned_id.as_deref() == Some(&cid);
-                let clean_mtime = if mtime.len() >= 19 {
-                    mtime[..19].replace('T', " ")
-                } else {
-                    mtime
-                };
-                results.push(SessionSummary {
-                    id: cid,
-                    title: if title.trim().is_empty() {
-                        "(sem titulo)".to_string()
-                    } else {
-                        title.trim().to_string()
-                    },
-                    steps,
-                    mtime: clean_mtime,
-                    uris,
-                    primary_workspace: primary_ws,
-                    status,
-                    pinned: is_pinned,
-                });
-            }
+            results.push(SessionSummary {
+                id: r.cid,
+                title: resolved_title,
+                steps: r.steps,
+                mtime: clean_mtime,
+                uris,
+                primary_workspace: primary_ws,
+                status: r.status,
+                pinned: is_pinned,
+                is_subagent,
+                agent_name: r.agent_name,
+                parent_id: r.parent_id,
+                parent_title,
+                nesting_depth: r.nesting_depth,
+                subagent_count,
+                title_source,
+            });
         }
     }
 
@@ -460,8 +731,14 @@ pub fn resolve_brain_target(
         return None;
     }
 
-    // Try prefix match on session ids
+    // Try prefix match on session ids (including subagents if not in main list)
     for s in &sessions {
+        if s.id.starts_with(t) {
+            return Some(s.id.clone());
+        }
+    }
+    let all_with_sub = fetch_sessions_ext(workspace_path, true, true, app_dir, None);
+    for s in &all_with_sub {
         if s.id.starts_with(t) {
             return Some(s.id.clone());
         }
@@ -477,6 +754,104 @@ pub fn resolve_brain_target(
     }
 
     None
+}
+
+pub fn rename_session(
+    target: &str,
+    new_title: &str,
+    workspace_path: Option<&Path>,
+    app_dir: Option<&Path>,
+    db_path: Option<&Path>,
+) -> Result<(String, String), Box<dyn std::error::Error>> {
+    let clean_title = clean_single_line(new_title, 120);
+    if clean_title.is_empty() {
+        return Err("O novo titulo nao pode ser vazio.".into());
+    }
+
+    let target_db = match db_path {
+        Some(p) => p.to_path_buf(),
+        None => get_db_path(app_dir),
+    };
+
+    let resolved_id = resolve_brain_target(Some(target), workspace_path, app_dir)
+        .ok_or_else(|| format!("Sessao '{}' nao encontrada.", target))?;
+
+    let conn = Connection::open(&target_db)?;
+    let updated = conn.execute(
+        "UPDATE conversation_summaries SET title = ?1 WHERE conversation_id = ?2",
+        rusqlite::params![&clean_title, &resolved_id],
+    )?;
+
+    if updated == 0 {
+        return Err(format!("Sessao '{}' nao encontrada no banco SQLite.", resolved_id).into());
+    }
+
+    let _ = conn.execute(
+        "UPDATE conversations_fts SET title = ?1 WHERE conversation_id = ?2",
+        rusqlite::params![&clean_title, &resolved_id],
+    );
+
+    Ok((resolved_id, clean_title))
+}
+
+pub fn prune_sessions(
+    dry_run: bool,
+    app_dir: Option<&Path>,
+    db_path: Option<&Path>,
+) -> Result<Vec<PrunedSession>, Box<dyn std::error::Error>> {
+    let target_db = match db_path {
+        Some(p) => p.to_path_buf(),
+        None => get_db_path(app_dir),
+    };
+
+    if !target_db.is_file() {
+        return Ok(Vec::new());
+    }
+
+    let conn = Connection::open(&target_db)?;
+    let brain_root = get_brain_root(app_dir);
+    let raw_rows = read_all_raw_rows(&conn);
+
+    let mut pruned = Vec::new();
+    for r in raw_rows {
+        let (_, title_source) = resolve_session_title(
+            &r.title,
+            &r.preview,
+            r.raw_summary.as_deref(),
+            &r.agent_name,
+            &brain_root,
+            &r.cid,
+        );
+
+        if !brain_has_files(&brain_root, &r.cid) && (r.steps == 0 || title_source == "empty") {
+            let clean_mtime = if r.mtime.len() >= 19 {
+                r.mtime[..19].replace('T', " ")
+            } else {
+                r.mtime
+            };
+            if !dry_run {
+                let _ = conn.execute(
+                    "DELETE FROM conversation_summaries WHERE conversation_id = ?1",
+                    rusqlite::params![&r.cid],
+                );
+                let _ = conn.execute(
+                    "DELETE FROM conversations_fts WHERE conversation_id = ?1",
+                    rusqlite::params![&r.cid],
+                );
+                let ghost_dir = brain_root.join(&r.cid);
+                if ghost_dir.is_dir() {
+                    let _ = fs::remove_dir_all(&ghost_dir);
+                }
+            }
+            pruned.push(PrunedSession {
+                id: r.cid,
+                steps: r.steps,
+                mtime: clean_mtime,
+            });
+        }
+    }
+
+    Ok(pruned)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
