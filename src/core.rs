@@ -767,18 +767,24 @@ pub fn get_brain_stats(brain_id: &str, app_dir: Option<&Path>) -> Option<BrainSt
     Some(stats)
 }
 
-pub fn resolve_brain_target(
+/// Shared index/uuid/"default"/prefix-matching resolution logic, independent
+/// of how `sessions` was produced. If no match is found locally, `broadened`
+/// is invoked (lazily) with the trimmed target string to retry against a
+/// wider session set (e.g. all workspaces, including subagents).
+pub fn resolve_target_generic<F>(
     target: Option<&str>,
-    workspace_path: Option<&Path>,
-    app_dir: Option<&Path>,
-) -> Option<String> {
+    sessions: &[SessionSummary],
+    pinned_id: Option<&str>,
+    broadened: F,
+) -> Option<String>
+where
+    F: FnOnce(&str) -> Option<String>,
+{
     let t = target.unwrap_or("default").trim();
 
     if t.len() >= 30 && t.contains('-') {
         return Some(t.to_string());
     }
-
-    let sessions = fetch_sessions(workspace_path, false, app_dir, None);
 
     if let Ok(idx) = t.parse::<usize>() {
         if idx < sessions.len() {
@@ -790,8 +796,8 @@ pub fn resolve_brain_target(
     }
 
     if t == "default" {
-        if let Some(pinned) = get_pinned_id_for_workspace(workspace_path, app_dir) {
-            return Some(pinned);
+        if let Some(pinned) = pinned_id {
+            return Some(pinned.to_string());
         }
         if let Some(first) = sessions.first() {
             return Some(first.id.clone());
@@ -800,19 +806,30 @@ pub fn resolve_brain_target(
     }
 
     // Try prefix match on session ids (including subagents/global if explicit prefix given)
-    for s in &sessions {
-        if s.id.starts_with(t) {
-            return Some(s.id.clone());
-        }
-    }
-    let all_with_sub = fetch_sessions_ext(workspace_path, true, true, app_dir, None);
-    for s in &all_with_sub {
+    for s in sessions {
         if s.id.starts_with(t) {
             return Some(s.id.clone());
         }
     }
 
-    None
+    broadened(t)
+}
+
+pub fn resolve_brain_target(
+    target: Option<&str>,
+    workspace_path: Option<&Path>,
+    app_dir: Option<&Path>,
+) -> Option<String> {
+    let sessions = fetch_sessions(workspace_path, false, app_dir, None);
+    let pinned_id = get_pinned_id_for_workspace(workspace_path, app_dir);
+
+    resolve_target_generic(target, &sessions, pinned_id.as_deref(), |t| {
+        let all_with_sub = fetch_sessions_ext(workspace_path, true, true, app_dir, None);
+        all_with_sub
+            .into_iter()
+            .find(|s| s.id.starts_with(t))
+            .map(|s| s.id)
+    })
 }
 
 pub fn rename_session(

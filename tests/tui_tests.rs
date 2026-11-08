@@ -9,12 +9,22 @@ use tempfile::tempdir;
 #[path = "../src/core.rs"]
 mod core;
 
+#[path = "../src/claude_code.rs"]
+mod claude_code;
+
+#[path = "../src/cli.rs"]
+mod cli;
+
+#[path = "../src/backend.rs"]
+mod backend;
+
 #[path = "../src/ui.rs"]
 mod ui;
 
 #[path = "../src/tui.rs"]
 mod tui;
 
+use backend::ProviderKind;
 use core::fetch_sessions_ext;
 use tui::{handle_key_event, render_ui, AppState, DeleteModalFocus, TuiAction};
 
@@ -93,7 +103,13 @@ fn test_tui_initial_render_and_split_layout() {
     let sessions = fetch_sessions_ext(Some(&ws_dir), false, false, Some(&app_dir), Some(&db_path));
     assert_eq!(sessions.len(), 2);
 
-    let mut state = AppState::new(sessions, ws_dir, Some(app_dir), false);
+    let mut state = AppState::new(
+        ProviderKind::Antigravity,
+        sessions,
+        ws_dir,
+        Some(app_dir),
+        false,
+    );
     let backend = TestBackend::new(120, 35);
     let mut terminal = Terminal::new(backend).unwrap();
 
@@ -113,7 +129,13 @@ fn test_tui_initial_render_and_split_layout() {
 fn test_tui_search_filtering_and_navigation() {
     let (_tmp, app_dir, ws_dir, db_path) = setup_test_db();
     let sessions = fetch_sessions_ext(Some(&ws_dir), false, false, Some(&app_dir), Some(&db_path));
-    let mut state = AppState::new(sessions, ws_dir, Some(app_dir.clone()), false);
+    let mut state = AppState::new(
+        ProviderKind::Antigravity,
+        sessions,
+        ws_dir,
+        Some(app_dir.clone()),
+        false,
+    );
 
     // Initially first session is selected
     assert_eq!(
@@ -167,7 +189,13 @@ fn test_tui_search_filtering_and_navigation() {
 fn test_tui_pin_and_unpin_toggle() {
     let (_tmp, app_dir, ws_dir, db_path) = setup_test_db();
     let sessions = fetch_sessions_ext(Some(&ws_dir), false, false, Some(&app_dir), Some(&db_path));
-    let mut state = AppState::new(sessions, ws_dir.clone(), Some(app_dir), false);
+    let mut state = AppState::new(
+        ProviderKind::Antigravity,
+        sessions,
+        ws_dir.clone(),
+        Some(app_dir),
+        false,
+    );
 
     assert!(!state.selected_session().unwrap().pinned);
     assert!(!ws_dir.join(".brain").exists());
@@ -193,7 +221,13 @@ fn test_tui_pin_and_unpin_toggle() {
 fn test_tui_subagents_and_all_mode_toggles() {
     let (_tmp, app_dir, ws_dir, db_path) = setup_test_db();
     let sessions = fetch_sessions_ext(Some(&ws_dir), false, false, Some(&app_dir), Some(&db_path));
-    let mut state = AppState::new(sessions, ws_dir, Some(app_dir), false);
+    let mut state = AppState::new(
+        ProviderKind::Antigravity,
+        sessions,
+        ws_dir,
+        Some(app_dir),
+        false,
+    );
 
     assert_eq!(state.all_sessions.len(), 2);
 
@@ -218,7 +252,13 @@ fn test_tui_subagents_and_all_mode_toggles() {
 fn test_tui_rename_and_delete_modals() {
     let (_tmp, app_dir, ws_dir, db_path) = setup_test_db();
     let sessions = fetch_sessions_ext(Some(&ws_dir), false, false, Some(&app_dir), Some(&db_path));
-    let mut state = AppState::new(sessions, ws_dir, Some(app_dir), false);
+    let mut state = AppState::new(
+        ProviderKind::Antigravity,
+        sessions,
+        ws_dir,
+        Some(app_dir),
+        false,
+    );
     let backend = TestBackend::new(120, 35);
     let mut terminal = Terminal::new(backend).unwrap();
 
@@ -272,4 +312,153 @@ fn test_tui_rename_and_delete_modals() {
         state.selected_session().unwrap().id,
         "beta-2222-2222-2222-222222222222"
     );
+}
+
+fn encode_project_dir(path: &std::path::Path) -> String {
+    path.to_string_lossy().replace(['\\', '/', ':'], "-")
+}
+
+fn cc_user_entry(cwd: &str, text: &str, ts: &str) -> String {
+    format!(
+        r#"{{"type":"user","message":{{"role":"user","content":"{text}"}},"cwd":"{cwd}","timestamp":"{ts}","isSidechain":false}}"#
+    )
+}
+
+fn cc_assistant_entry(cwd: &str, ts: &str) -> String {
+    format!(
+        r#"{{"type":"assistant","message":{{"role":"assistant","content":[{{"type":"text","text":"ok"}}]}},"cwd":"{cwd}","timestamp":"{ts}","isSidechain":false}}"#
+    )
+}
+
+fn cc_summary_entry(title: &str) -> String {
+    format!(r#"{{"type":"summary","summary":"{title}","leafUuid":"x"}}"#)
+}
+
+fn write_cc_session_file(
+    projects_root: &std::path::Path,
+    ws: &std::path::Path,
+    id: &str,
+    lines: &[String],
+) -> std::path::PathBuf {
+    let project_dir = projects_root.join(encode_project_dir(ws));
+    fs::create_dir_all(&project_dir).unwrap();
+    let file_path = project_dir.join(format!("{id}.jsonl"));
+    fs::write(&file_path, lines.join("\n") + "\n").unwrap();
+    file_path
+}
+
+fn setup_claude_code_test_env() -> (
+    tempfile::TempDir,
+    std::path::PathBuf,
+    std::path::PathBuf,
+    std::path::PathBuf,
+) {
+    let tmp = tempdir().unwrap();
+    let app_dir = tmp.path().join("claude_home");
+    let ws_dir = tmp.path().join("project_cc");
+    fs::create_dir_all(app_dir.join("projects")).unwrap();
+    fs::create_dir_all(&ws_dir).unwrap();
+
+    let projects_root = app_dir.join("projects");
+    let ws_str = ws_dir.to_string_lossy().replace('\\', "/");
+
+    let transcript = write_cc_session_file(
+        &projects_root,
+        &ws_dir,
+        "cc-alpha-1111-1111-111111111111",
+        &[
+            cc_summary_entry("Claude Code Session Alpha"),
+            cc_user_entry(&ws_str, "do something", "2026-11-06T10:00:00.000Z"),
+            cc_assistant_entry(&ws_str, "2026-11-06T10:05:00.000Z"),
+        ],
+    );
+
+    (tmp, app_dir, ws_dir, transcript)
+}
+
+#[test]
+fn test_tui_claude_code_pin_and_unpin_toggle_uses_dedicated_sidecar() {
+    let (_tmp, app_dir, ws_dir, _transcript) = setup_claude_code_test_env();
+    let sessions = claude_code::fetch_sessions_ext(Some(&ws_dir), false, false, Some(&app_dir));
+    assert_eq!(sessions.len(), 1);
+
+    let mut state = AppState::new(
+        ProviderKind::ClaudeCode,
+        sessions,
+        ws_dir.clone(),
+        Some(app_dir.clone()),
+        false,
+    );
+
+    assert!(!state.selected_session().unwrap().pinned);
+    assert!(!ws_dir.join(".claude-brain").exists());
+
+    handle_key_event(
+        &mut state,
+        KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL),
+    );
+    assert!(state.selected_session().unwrap().pinned);
+    assert!(ws_dir.join(".claude-brain").is_file());
+    // Never touches Antigravity's own pin marker.
+    assert!(!ws_dir.join(".brain").exists());
+
+    handle_key_event(
+        &mut state,
+        KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL),
+    );
+    assert!(!state.selected_session().unwrap().pinned);
+    assert!(!ws_dir.join(".claude-brain").exists());
+}
+
+#[test]
+fn test_tui_claude_code_navigate_enters_recorded_cwd() {
+    let (_tmp, app_dir, ws_dir, _transcript) = setup_claude_code_test_env();
+    let sessions = claude_code::fetch_sessions_ext(Some(&ws_dir), false, false, Some(&app_dir));
+    let mut state = AppState::new(
+        ProviderKind::ClaudeCode,
+        sessions,
+        ws_dir.clone(),
+        Some(app_dir),
+        false,
+    );
+
+    let action = handle_key_event(
+        &mut state,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+    );
+    // Unlike Antigravity's synthetic brain/<id> folder, Enter here jumps to
+    // the session's real recorded project directory.
+    assert_eq!(action, Some(TuiAction::Navigate(ws_dir)));
+}
+
+#[test]
+fn test_tui_claude_code_delete_removes_transcript_from_disk() {
+    let (_tmp, app_dir, ws_dir, transcript) = setup_claude_code_test_env();
+    let sessions = claude_code::fetch_sessions_ext(Some(&ws_dir), false, false, Some(&app_dir));
+    let mut state = AppState::new(
+        ProviderKind::ClaudeCode,
+        sessions,
+        ws_dir,
+        Some(app_dir),
+        false,
+    );
+
+    assert!(transcript.exists());
+
+    handle_key_event(
+        &mut state,
+        KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
+    );
+    assert!(state.confirm_delete);
+
+    handle_key_event(&mut state, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert_eq!(state.delete_modal_focus, DeleteModalFocus::Confirm);
+    handle_key_event(
+        &mut state,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+    );
+
+    assert!(!state.confirm_delete);
+    assert!(state.all_sessions.is_empty());
+    assert!(!transcript.exists());
 }

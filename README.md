@@ -6,18 +6,30 @@
 [![Pure Rust](https://img.shields.io/badge/Pure%20Rust-100%25-blue.svg)](https://github.com/caiosaboia/agy-brain)
 [![Zero External Dependencies](https://img.shields.io/badge/dependencies-0%20runtime-brightgreen.svg)](https://github.com/caiosaboia/agy-brain)
 
-**agy-brain** is a blazing-fast, standalone CLI navigator and session inspector for **Antigravity CLI**, written 100% in Pure Rust. It allows developers to instantly jump to workspace brain directories, inspect generated artifacts and plan files, explore sessions via an embedded terminal user interface (TUI), and manage session pins across Windows, macOS, and Linux.
+**agy-brain** is a blazing-fast, standalone CLI navigator and session inspector for **Antigravity CLI** and **Claude Code**, written 100% in Pure Rust. It allows developers to instantly jump to workspace brain/project directories, inspect generated artifacts and plan files, explore sessions via an embedded terminal user interface (TUI), and manage session pins across Windows, macOS, and Linux.
 
 ---
 
 ## Highlights
 
 * **100% Pure Rust & Single Binary:** Zero external runtime dependencies. No Python, Node, or system SQLite library needed (bundled C SQLite included).
+* **Dual Session Backends:** Works against **Antigravity CLI**'s SQLite database and brain folders, or **Claude Code**'s on-disk JSONL transcripts under `~/.claude/projects` - the same commands behave consistently on either, auto-detected or selected explicitly with `--provider`.
 * **Embedded Interactive TUI:** Built-in dashboard powered by `ratatui` and `crossterm` with instant fuzzy search, side-by-side session inspection, live metrics, and keyboard shortcuts.
-* **Smart Auto-Discovery:** Seamlessly discovers Antigravity database files and brain directories across platform-specific locations or custom `$AGY_APP_DIR` paths.
-* **Workspace Pinning:** Pin primary sessions per workspace using local `.brain` files or the global pin registry (`workspace_pins.json`).
+* **Smart Auto-Discovery:** Seamlessly discovers Antigravity database files and brain directories, or Claude Code's project history, across platform-specific locations or custom `$AGY_APP_DIR` paths.
+* **Workspace Pinning:** Pin primary sessions per workspace using local marker files or the global pin registry, kept separate per provider so both can coexist without collisions.
 * **Universal Shell Integration:** Native `cd` navigation support across **PowerShell**, **Bash**, **Zsh**, and **Fish**.
 * **Native Desktop Integration:** Open sessions in your platform's default file manager (`explorer.exe`, `open`, `xdg-open`) or preferred editor (`$EDITOR`, `code`, `nvim`, `nano`).
+
+---
+
+## Session Backends
+
+agy-brain supports two providers behind the same command surface:
+
+* **`antigravity`** (default when its database is found): Antigravity CLI's `conversation_summaries.db` + `brain/<uuid>/` artifact tree.
+* **`claude-code`**: Claude Code's `~/.claude/projects/<project>/<session-uuid>.jsonl` transcripts. Pins and renamed titles are kept in agy-brain-owned sidecar files next to Claude Code's own data; agy-brain never writes into Claude Code's own files. `go`/`open`/`edit`/`nvim` jump to the session's real recorded project directory, and `artifacts` reports the transcript plus any matching `~/.claude/todos/` entries.
+
+Select the provider explicitly with `--provider antigravity|claude-code` (or the `AGY_PROVIDER` env var); by default agy-brain auto-detects based on what it finds. Run `agy-brain doctor` to see which provider was selected and why. See [`docs/specs/claude-code-provider.md`](docs/specs/claude-code-provider.md) for the full design.
 
 ---
 
