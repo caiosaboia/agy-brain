@@ -38,6 +38,18 @@ fn test_normalize_workspace_path() {
         normalize_workspace_path("/home/user/code/"),
         "home/user/code"
     );
+    assert_eq!(
+        normalize_workspace_path("/private/var/folders/xx/test/"),
+        "var/folders/xx/test"
+    );
+    assert_eq!(
+        normalize_workspace_path("file:///private/var/folders/xx/test"),
+        "var/folders/xx/test"
+    );
+    assert_eq!(
+        normalize_workspace_path("/var/folders/xx/test"),
+        "var/folders/xx/test"
+    );
     assert_eq!(normalize_workspace_path(""), "");
 }
 

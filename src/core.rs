@@ -181,6 +181,15 @@ pub fn normalize_workspace_path(path_str: &str) -> String {
     while s.ends_with('/') && !s.is_empty() {
         s.pop();
     }
+    for prefix in ["private/var/", "private/tmp/", "private/etc/"] {
+        if let Some(rest) = s.strip_prefix(prefix) {
+            s = format!("{}{}", &prefix["private/".len()..], rest);
+            break;
+        }
+    }
+    if s == "private/var" || s == "private/tmp" || s == "private/etc" {
+        s = s["private/".len()..].to_string();
+    }
     #[cfg(target_os = "windows")]
     {
         s = s.to_lowercase();

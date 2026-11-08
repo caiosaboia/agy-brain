@@ -434,6 +434,17 @@ pub fn fetch_sessions_ext(
         let encoded = projects_root.join(encode_project_dir(ws));
         if encoded.is_dir() {
             dirs_to_scan.push(encoded);
+        } else {
+            // When symlinks or path aliases differ (such as macOS /var vs /private/var),
+            // scan project subdirectories since the transcript entries' internal cwd
+            // remains the authoritative match criterion.
+            if let Ok(entries) = fs::read_dir(&projects_root) {
+                for e in entries.flatten() {
+                    if e.path().is_dir() {
+                        dirs_to_scan.push(e.path());
+                    }
+                }
+            }
         }
     }
 
