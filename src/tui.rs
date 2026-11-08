@@ -23,6 +23,7 @@ use ratatui::{
 use std::io::{self, stderr};
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TuiAction {
     Navigate(PathBuf),
     Exit,
@@ -34,24 +35,24 @@ pub enum DeleteModalFocus {
     Confirm,
 }
 
-struct AppState {
-    all_sessions: Vec<SessionSummary>,
-    filtered_indices: Vec<usize>,
-    search_query: String,
-    list_state: ListState,
-    all_mode: bool,
-    show_subagents: bool,
-    workspace: PathBuf,
-    app_dir: Option<PathBuf>,
-    confirm_delete: bool,
-    delete_modal_focus: DeleteModalFocus,
-    modal_rect: Option<Rect>,
-    renaming: bool,
-    rename_input: String,
+pub struct AppState {
+    pub all_sessions: Vec<SessionSummary>,
+    pub filtered_indices: Vec<usize>,
+    pub search_query: String,
+    pub list_state: ListState,
+    pub all_mode: bool,
+    pub show_subagents: bool,
+    pub workspace: PathBuf,
+    pub app_dir: Option<PathBuf>,
+    pub confirm_delete: bool,
+    pub delete_modal_focus: DeleteModalFocus,
+    pub modal_rect: Option<Rect>,
+    pub renaming: bool,
+    pub rename_input: String,
 }
 
 impl AppState {
-    fn new(
+    pub fn new(
         sessions: Vec<SessionSummary>,
         workspace: PathBuf,
         app_dir: Option<PathBuf>,
@@ -79,7 +80,7 @@ impl AppState {
         }
     }
 
-    fn filter_sessions(&mut self) {
+    pub fn filter_sessions(&mut self) {
         let q = self.search_query.to_lowercase().trim().to_string();
         self.filtered_indices = self
             .all_sessions
@@ -106,7 +107,7 @@ impl AppState {
         }
     }
 
-    fn next(&mut self) {
+    pub fn next(&mut self) {
         if self.filtered_indices.is_empty() {
             return;
         }
@@ -119,7 +120,7 @@ impl AppState {
         self.list_state.select(Some(next));
     }
 
-    fn previous(&mut self) {
+    pub fn previous(&mut self) {
         if self.filtered_indices.is_empty() {
             return;
         }
@@ -132,11 +133,212 @@ impl AppState {
         self.list_state.select(Some(prev));
     }
 
-    fn selected_session(&self) -> Option<&SessionSummary> {
+    pub fn selected_session(&self) -> Option<&SessionSummary> {
         let selected_idx = self.list_state.selected()?;
         let orig_idx = *self.filtered_indices.get(selected_idx)?;
         self.all_sessions.get(orig_idx)
     }
+}
+
+pub fn handle_key_event(state: &mut AppState, key: event::KeyEvent) -> Option<TuiAction> {
+    if key.kind != event::KeyEventKind::Press {
+        return None;
+    }
+
+    if state.confirm_delete {
+        match (key.modifiers, key.code) {
+            (
+                KeyModifiers::NONE,
+                KeyCode::Left
+                | KeyCode::Right
+                | KeyCode::Up
+                | KeyCode::Down
+                | KeyCode::Tab
+                | KeyCode::BackTab
+                | KeyCode::Char('h')
+                | KeyCode::Char('l'),
+            ) => {
+                state.delete_modal_focus = match state.delete_modal_focus {
+                    DeleteModalFocus::Cancel => DeleteModalFocus::Confirm,
+                    DeleteModalFocus::Confirm => DeleteModalFocus::Cancel,
+                };
+            }
+            (KeyModifiers::NONE, KeyCode::Enter) => {
+                if state.delete_modal_focus == DeleteModalFocus::Confirm {
+                    if let Some(session) = state.selected_session() {
+                        let _ = delete_session(
+                            &session.id,
+                            Some(&state.workspace),
+                            state.app_dir.as_deref(),
+                            None,
+                        );
+                        let target_id = session.id.clone();
+                        state.all_sessions.retain(|s| s.id != target_id);
+                        state.filter_sessions();
+                    }
+                }
+                state.confirm_delete = false;
+                state.delete_modal_focus = DeleteModalFocus::Cancel;
+            }
+            (KeyModifiers::NONE, KeyCode::Char('y') | KeyCode::Char('s')) => {
+                if let Some(session) = state.selected_session() {
+                    let _ = delete_session(
+                        &session.id,
+                        Some(&state.workspace),
+                        state.app_dir.as_deref(),
+                        None,
+                    );
+                    let target_id = session.id.clone();
+                    state.all_sessions.retain(|s| s.id != target_id);
+                    state.filter_sessions();
+                }
+                state.confirm_delete = false;
+                state.delete_modal_focus = DeleteModalFocus::Cancel;
+            }
+            (KeyModifiers::NONE, KeyCode::Char('n') | KeyCode::Esc | KeyCode::Char('q')) => {
+                state.confirm_delete = false;
+                state.delete_modal_focus = DeleteModalFocus::Cancel;
+            }
+            _ => {}
+        }
+        return None;
+    }
+
+    if state.renaming {
+        match (key.modifiers, key.code) {
+            (KeyModifiers::NONE, KeyCode::Esc) => {
+                state.renaming = false;
+                state.rename_input.clear();
+            }
+            (KeyModifiers::NONE, KeyCode::Enter) => {
+                let new_title = state.rename_input.trim().to_string();
+                if !new_title.is_empty() {
+                    if let Some(session) = state.selected_session() {
+                        let target_id = session.id.clone();
+                        if let Ok((_, saved_title)) = rename_session(
+                            &target_id,
+                            &new_title,
+                            Some(&state.workspace),
+                            state.app_dir.as_deref(),
+                            None,
+                        ) {
+                            for s in &mut state.all_sessions {
+                                if s.id == target_id {
+                                    s.title = saved_title.clone();
+                                    s.title_source = "title".to_string();
+                                }
+                                if s.parent_id == target_id {
+                                    s.parent_title = Some(saved_title.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                state.renaming = false;
+                state.rename_input.clear();
+            }
+            (KeyModifiers::NONE, KeyCode::Backspace) => {
+                state.rename_input.pop();
+            }
+            (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+                state.rename_input.push(c);
+            }
+            _ => {}
+        }
+        return None;
+    }
+
+    match (key.modifiers, key.code) {
+        (KeyModifiers::NONE, KeyCode::Esc) | (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
+            return Some(TuiAction::Exit);
+        }
+        (KeyModifiers::NONE, KeyCode::Enter) => {
+            if let Some(session) = state.selected_session() {
+                let brain_path = get_brain_root(state.app_dir.as_deref()).join(&session.id);
+                return Some(TuiAction::Navigate(brain_path));
+            }
+        }
+        (KeyModifiers::CONTROL, KeyCode::Char('o')) => {
+            if let Some(session) = state.selected_session() {
+                let brain_path = get_brain_root(state.app_dir.as_deref()).join(&session.id);
+                open_in_file_manager(&brain_path);
+            }
+        }
+        (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
+            if let Some(session) = state.selected_session() {
+                let cur_id = session.id.clone();
+                let was_pinned = session.pinned;
+                if was_pinned {
+                    let _ = remove_pin(Some(&state.workspace), state.app_dir.as_deref());
+                    for s in &mut state.all_sessions {
+                        if s.id == cur_id {
+                            s.pinned = false;
+                        }
+                    }
+                } else {
+                    let _ = set_pin(&cur_id, Some(&state.workspace), state.app_dir.as_deref());
+                    for s in &mut state.all_sessions {
+                        s.pinned = s.id == cur_id;
+                    }
+                }
+                state
+                    .all_sessions
+                    .sort_by(|a, b| b.pinned.cmp(&a.pinned).then_with(|| b.steps.cmp(&a.steps)));
+                state.filter_sessions();
+            }
+        }
+        (KeyModifiers::CONTROL, KeyCode::Char('r')) => {
+            if let Some(session) = state.selected_session() {
+                state.rename_input = session.title.clone();
+                state.renaming = true;
+            }
+        }
+        (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
+            if state.selected_session().is_some() {
+                state.confirm_delete = true;
+                state.delete_modal_focus = DeleteModalFocus::Cancel;
+            }
+        }
+        (KeyModifiers::CONTROL, KeyCode::Char('a')) => {
+            state.all_mode = !state.all_mode;
+            state.all_sessions = fetch_sessions_ext(
+                Some(&state.workspace),
+                state.all_mode,
+                state.show_subagents,
+                state.app_dir.as_deref(),
+                None,
+            );
+            state.filter_sessions();
+        }
+        (KeyModifiers::CONTROL, KeyCode::Char('s')) => {
+            state.show_subagents = !state.show_subagents;
+            state.all_sessions = fetch_sessions_ext(
+                Some(&state.workspace),
+                state.all_mode,
+                state.show_subagents,
+                state.app_dir.as_deref(),
+                None,
+            );
+            state.filter_sessions();
+        }
+        (KeyModifiers::NONE, KeyCode::Up) => {
+            state.previous();
+        }
+        (KeyModifiers::NONE, KeyCode::Down) => {
+            state.next();
+        }
+        (KeyModifiers::NONE, KeyCode::Backspace) => {
+            state.search_query.pop();
+            state.filter_sessions();
+        }
+        (KeyModifiers::NONE, KeyCode::Char(c)) => {
+            state.search_query.push(c);
+            state.filter_sessions();
+        }
+        _ => {}
+    }
+
+    None
 }
 
 pub fn run_interactive_tui(
@@ -176,7 +378,7 @@ fn main_loop<B: ratatui::backend::Backend>(
     state: &mut AppState,
 ) -> io::Result<TuiAction> {
     loop {
-        terminal.draw(|f| ui(f, state))?;
+        terminal.draw(|f| render_ui(f, state))?;
 
         let event = event::read()?;
 
@@ -222,239 +424,44 @@ fn main_loop<B: ratatui::backend::Backend>(
         }
 
         if let Event::Key(key) = event {
-            if key.kind != event::KeyEventKind::Press {
-                continue;
-            }
-
-            if state.confirm_delete {
-                match (key.modifiers, key.code) {
+            if key.kind == event::KeyEventKind::Press
+                && !state.confirm_delete
+                && !state.renaming
+                && matches!(
+                    (key.modifiers, key.code),
                     (
-                        KeyModifiers::NONE,
-                        KeyCode::Left
-                        | KeyCode::Right
-                        | KeyCode::Up
-                        | KeyCode::Down
-                        | KeyCode::Tab
-                        | KeyCode::BackTab
-                        | KeyCode::Char('h')
-                        | KeyCode::Char('l'),
-                    ) => {
-                        state.delete_modal_focus = match state.delete_modal_focus {
-                            DeleteModalFocus::Cancel => DeleteModalFocus::Confirm,
-                            DeleteModalFocus::Confirm => DeleteModalFocus::Cancel,
-                        };
-                    }
-                    (KeyModifiers::NONE, KeyCode::Enter) => {
-                        if state.delete_modal_focus == DeleteModalFocus::Confirm {
-                            if let Some(session) = state.selected_session() {
-                                let _ = delete_session(
-                                    &session.id,
-                                    Some(&state.workspace),
-                                    state.app_dir.as_deref(),
-                                    None,
-                                );
-                                let target_id = session.id.clone();
-                                state.all_sessions.retain(|s| s.id != target_id);
-                                state.filter_sessions();
-                            }
-                        }
-                        state.confirm_delete = false;
-                        state.delete_modal_focus = DeleteModalFocus::Cancel;
-                    }
-                    (KeyModifiers::NONE, KeyCode::Char('y') | KeyCode::Char('s')) => {
-                        if let Some(session) = state.selected_session() {
-                            let _ = delete_session(
-                                &session.id,
-                                Some(&state.workspace),
-                                state.app_dir.as_deref(),
-                                None,
-                            );
-                            let target_id = session.id.clone();
-                            state.all_sessions.retain(|s| s.id != target_id);
-                            state.filter_sessions();
-                        }
-                        state.confirm_delete = false;
-                        state.delete_modal_focus = DeleteModalFocus::Cancel;
-                    }
-                    (
-                        KeyModifiers::NONE,
-                        KeyCode::Char('n') | KeyCode::Esc | KeyCode::Char('q'),
-                    ) => {
-                        state.confirm_delete = false;
-                        state.delete_modal_focus = DeleteModalFocus::Cancel;
-                    }
-                    _ => {}
+                        KeyModifiers::CONTROL,
+                        KeyCode::Char('e') | KeyCode::Char('v') | KeyCode::Char('n')
+                    ) | (
+                        KeyModifiers::ALT,
+                        KeyCode::Char('v') | KeyCode::Char('n') | KeyCode::Char('e')
+                    ) | (KeyModifiers::NONE, KeyCode::F(2))
+                )
+            {
+                if let Some(session) = state.selected_session() {
+                    let brain_path = get_brain_root(state.app_dir.as_deref()).join(&session.id);
+                    let _ = disable_raw_mode();
+                    let _ = execute!(std::io::stderr(), LeaveAlternateScreen, DisableMouseCapture);
+                    let _ = terminal.show_cursor();
+
+                    let _ = open_in_neovim(&brain_path);
+
+                    let _ = enable_raw_mode();
+                    let _ = execute!(std::io::stderr(), EnterAlternateScreen, EnableMouseCapture);
+                    let _ = terminal.hide_cursor();
+                    let _ = terminal.clear();
                 }
                 continue;
             }
 
-            if state.renaming {
-                match (key.modifiers, key.code) {
-                    (KeyModifiers::NONE, KeyCode::Esc) => {
-                        state.renaming = false;
-                        state.rename_input.clear();
-                    }
-                    (KeyModifiers::NONE, KeyCode::Enter) => {
-                        let new_title = state.rename_input.trim().to_string();
-                        if !new_title.is_empty() {
-                            if let Some(session) = state.selected_session() {
-                                let target_id = session.id.clone();
-                                if let Ok((_, saved_title)) = rename_session(
-                                    &target_id,
-                                    &new_title,
-                                    Some(&state.workspace),
-                                    state.app_dir.as_deref(),
-                                    None,
-                                ) {
-                                    for s in &mut state.all_sessions {
-                                        if s.id == target_id {
-                                            s.title = saved_title.clone();
-                                            s.title_source = "title".to_string();
-                                        }
-                                        if s.parent_id == target_id {
-                                            s.parent_title = Some(saved_title.clone());
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        state.renaming = false;
-                        state.rename_input.clear();
-                    }
-                    (KeyModifiers::NONE, KeyCode::Backspace) => {
-                        state.rename_input.pop();
-                    }
-                    (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char(c)) => {
-                        state.rename_input.push(c);
-                    }
-                    _ => {}
-                }
-                continue;
-            }
-
-            match (key.modifiers, key.code) {
-                (KeyModifiers::NONE, KeyCode::Esc) => {
-                    return Ok(TuiAction::Exit);
-                }
-                (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
-                    return Ok(TuiAction::Exit);
-                }
-                (KeyModifiers::NONE, KeyCode::Enter) => {
-                    if let Some(session) = state.selected_session() {
-                        let brain_path = get_brain_root(state.app_dir.as_deref()).join(&session.id);
-                        return Ok(TuiAction::Navigate(brain_path));
-                    }
-                }
-                (KeyModifiers::CONTROL, KeyCode::Char('o')) => {
-                    if let Some(session) = state.selected_session() {
-                        let brain_path = get_brain_root(state.app_dir.as_deref()).join(&session.id);
-                        open_in_file_manager(&brain_path);
-                    }
-                }
-                (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
-                    if let Some(session) = state.selected_session() {
-                        let cur_id = session.id.clone();
-                        let was_pinned = session.pinned;
-                        if was_pinned {
-                            let _ = remove_pin(Some(&state.workspace), state.app_dir.as_deref());
-                            for s in &mut state.all_sessions {
-                                if s.id == cur_id {
-                                    s.pinned = false;
-                                }
-                            }
-                        } else {
-                            let _ =
-                                set_pin(&cur_id, Some(&state.workspace), state.app_dir.as_deref());
-                            for s in &mut state.all_sessions {
-                                s.pinned = s.id == cur_id;
-                            }
-                        }
-                        state.all_sessions.sort_by(|a, b| {
-                            b.pinned.cmp(&a.pinned).then_with(|| b.steps.cmp(&a.steps))
-                        });
-                        state.filter_sessions();
-                    }
-                }
-                (KeyModifiers::CONTROL, KeyCode::Char('r')) => {
-                    if let Some(session) = state.selected_session() {
-                        state.rename_input = session.title.clone();
-                        state.renaming = true;
-                    }
-                }
-                (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
-                    if state.selected_session().is_some() {
-                        state.confirm_delete = true;
-                        state.delete_modal_focus = DeleteModalFocus::Cancel;
-                    }
-                }
-                (
-                    KeyModifiers::CONTROL,
-                    KeyCode::Char('e') | KeyCode::Char('v') | KeyCode::Char('n'),
-                )
-                | (
-                    KeyModifiers::ALT,
-                    KeyCode::Char('v') | KeyCode::Char('n') | KeyCode::Char('e'),
-                )
-                | (KeyModifiers::NONE, KeyCode::F(2)) => {
-                    if let Some(session) = state.selected_session() {
-                        let brain_path = get_brain_root(state.app_dir.as_deref()).join(&session.id);
-                        let _ = disable_raw_mode();
-                        let _ =
-                            execute!(std::io::stderr(), LeaveAlternateScreen, DisableMouseCapture);
-                        let _ = terminal.show_cursor();
-
-                        let _ = open_in_neovim(&brain_path);
-
-                        let _ = enable_raw_mode();
-                        let _ =
-                            execute!(std::io::stderr(), EnterAlternateScreen, EnableMouseCapture);
-                        let _ = terminal.hide_cursor();
-                        let _ = terminal.clear();
-                    }
-                }
-                (KeyModifiers::CONTROL, KeyCode::Char('a')) => {
-                    state.all_mode = !state.all_mode;
-                    state.all_sessions = fetch_sessions_ext(
-                        Some(&state.workspace),
-                        state.all_mode,
-                        state.show_subagents,
-                        state.app_dir.as_deref(),
-                        None,
-                    );
-                    state.filter_sessions();
-                }
-                (KeyModifiers::CONTROL, KeyCode::Char('s')) => {
-                    state.show_subagents = !state.show_subagents;
-                    state.all_sessions = fetch_sessions_ext(
-                        Some(&state.workspace),
-                        state.all_mode,
-                        state.show_subagents,
-                        state.app_dir.as_deref(),
-                        None,
-                    );
-                    state.filter_sessions();
-                }
-                (KeyModifiers::NONE, KeyCode::Up) => {
-                    state.previous();
-                }
-                (KeyModifiers::NONE, KeyCode::Down) => {
-                    state.next();
-                }
-                (KeyModifiers::NONE, KeyCode::Backspace) => {
-                    state.search_query.pop();
-                    state.filter_sessions();
-                }
-                (KeyModifiers::NONE, KeyCode::Char(c)) => {
-                    state.search_query.push(c);
-                    state.filter_sessions();
-                }
-                _ => {}
+            if let Some(action) = handle_key_event(state, key) {
+                return Ok(action);
             }
         }
     }
 }
 
-fn ui(f: &mut Frame, state: &mut AppState) {
+pub fn render_ui(f: &mut Frame, state: &mut AppState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
