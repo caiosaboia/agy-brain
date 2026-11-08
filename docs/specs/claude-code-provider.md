@@ -149,6 +149,20 @@ removed" for this provider (field names are reused as-is to avoid widening
 the struct for a cosmetic distinction; CLI messages are phrased per
 provider, see `src/main.rs`).
 
+### 4.5 Deviation: `artifacts` rendering
+
+`src/ui.rs::list_artifacts` renders Antigravity's `artifacts` command by
+re-scanning the `brain/<uuid>/` directory directly (plus its `scratch/`
+subfolder), independent of `BrainStats.recent_artifacts`. Claude Code has no
+such colocated directory - its transcript and todo files live in different
+roots (`projects/` vs `todos/`) - so that re-scan approach does not apply.
+Rather than changing `list_artifacts`'s behavior for Antigravity (risking its
+existing test coverage), a second function,
+`src/ui.rs::list_artifacts_from_stats`, renders `BrainStats.recent_artifacts`
+directly and is used only for the Claude Code provider's `artifacts` command.
+`info`/`render_preview` already consumed `BrainStats` fields directly and
+needed no change for either provider.
+
 ## 5. Provider selection
 
 New global flag: `--provider <auto|antigravity|claude-code>` (also settable

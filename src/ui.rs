@@ -266,6 +266,58 @@ pub fn list_artifacts(brain_id: &str, stats: Option<&BrainStats>) {
     );
 }
 
+pub fn list_artifacts_from_stats(brain_id: &str, stats: Option<&BrainStats>) {
+    let st = match stats {
+        Some(s) if s.exists => s,
+        _ => {
+            println!("{RED}[!] Sessao {brain_id} nao encontrada no disco.{RESET}");
+            return;
+        }
+    };
+
+    println!("\n{CYAN}{BOLD}+------------------------------------------------------------------------+{RESET}");
+    println!(
+        "{CYAN}{BOLD}| ARTEFATOS DA SESSAO: {:<49} |{RESET}",
+        if brain_id.len() > 16 {
+            format!("{}...", &brain_id[..16])
+        } else {
+            brain_id.to_string()
+        }
+    );
+    println!("{CYAN}{BOLD}+------------------------------------------------------------------------+{RESET}");
+    println!("{DIM}Caminho: {}{RESET}\n", st.path.display());
+
+    if st.recent_artifacts.is_empty() {
+        println!("{YELLOW}[*] Nenhum artefato encontrado para esta sessao.{RESET}\n");
+        return;
+    }
+
+    println!(
+        "{WHITE}{BOLD}{:<48} {:>10}  MODIFICADO{RESET}",
+        "ARQUIVO", "TAMANHO"
+    );
+    println!("{DIM}{:-<48} {:-<10}  {:-<16}{RESET}", "", "", "");
+    for art in &st.recent_artifacts {
+        let kb = format!("{:.1} KB", art.size as f64 / 1024.0);
+        let dt = if let Some(utc) = DateTime::<Utc>::from_timestamp(art.mtime as i64, 0) {
+            utc.format("%Y-%m-%d %H:%M").to_string()
+        } else {
+            "-".to_string()
+        };
+        let color = if art.category == "transcript" {
+            GREEN
+        } else {
+            WHITE
+        };
+        println!("{color}{:<48}{RESET} {DIM}{kb:>10}  {dt}{RESET}", art.name);
+    }
+
+    println!(
+        "\n{DIM}Total de artefatos visiveis: {}{RESET}\n",
+        st.recent_artifacts.len()
+    );
+}
+
 pub fn open_in_file_manager(target_path: &Path) -> bool {
     if !target_path.exists() {
         return false;

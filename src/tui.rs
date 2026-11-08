@@ -1,7 +1,5 @@
-use crate::core::{
-    delete_session, fetch_sessions_ext, get_brain_root, get_brain_stats, remove_pin,
-    rename_session, set_pin, truncate_str, BrainStats, SessionSummary,
-};
+use crate::backend::{self, ProviderKind};
+use crate::core::{truncate_str, BrainStats, SessionSummary};
 use crate::ui::{open_in_file_manager, open_in_neovim};
 use chrono::{DateTime, Utc};
 use crossterm::{
@@ -44,6 +42,7 @@ pub struct AppState {
     pub show_subagents: bool,
     pub workspace: PathBuf,
     pub app_dir: Option<PathBuf>,
+    pub provider: ProviderKind,
     pub confirm_delete: bool,
     pub delete_modal_focus: DeleteModalFocus,
     pub modal_rect: Option<Rect>,
@@ -53,6 +52,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(
+        provider: ProviderKind,
         sessions: Vec<SessionSummary>,
         workspace: PathBuf,
         app_dir: Option<PathBuf>,
@@ -72,6 +72,7 @@ impl AppState {
             show_subagents,
             workspace,
             app_dir,
+            provider,
             confirm_delete: false,
             delete_modal_focus: DeleteModalFocus::Cancel,
             modal_rect: None,
@@ -166,11 +167,11 @@ pub fn handle_key_event(state: &mut AppState, key: event::KeyEvent) -> Option<Tu
             (KeyModifiers::NONE, KeyCode::Enter) => {
                 if state.delete_modal_focus == DeleteModalFocus::Confirm {
                     if let Some(session) = state.selected_session() {
-                        let _ = delete_session(
+                        let _ = backend::delete_session(
+                            state.provider,
                             &session.id,
                             Some(&state.workspace),
                             state.app_dir.as_deref(),
-                            None,
                         );
                         let target_id = session.id.clone();
                         state.all_sessions.retain(|s| s.id != target_id);
@@ -182,11 +183,11 @@ pub fn handle_key_event(state: &mut AppState, key: event::KeyEvent) -> Option<Tu
             }
             (KeyModifiers::NONE, KeyCode::Char('y') | KeyCode::Char('s')) => {
                 if let Some(session) = state.selected_session() {
-                    let _ = delete_session(
+                    let _ = backend::delete_session(
+                        state.provider,
                         &session.id,
                         Some(&state.workspace),
                         state.app_dir.as_deref(),
-                        None,
                     );
                     let target_id = session.id.clone();
                     state.all_sessions.retain(|s| s.id != target_id);
@@ -215,12 +216,12 @@ pub fn handle_key_event(state: &mut AppState, key: event::KeyEvent) -> Option<Tu
                 if !new_title.is_empty() {
                     if let Some(session) = state.selected_session() {
                         let target_id = session.id.clone();
-                        if let Ok((_, saved_title)) = rename_session(
+                        if let Ok((_, saved_title)) = backend::rename_session(
+                            state.provider,
                             &target_id,
                             &new_title,
                             Some(&state.workspace),
                             state.app_dir.as_deref(),
-                            None,
                         ) {
                             for s in &mut state.all_sessions {
                                 if s.id == target_id {
@@ -254,14 +255,26 @@ pub fn handle_key_event(state: &mut AppState, key: event::KeyEvent) -> Option<Tu
         }
         (KeyModifiers::NONE, KeyCode::Enter) => {
             if let Some(session) = state.selected_session() {
-                let brain_path = get_brain_root(state.app_dir.as_deref()).join(&session.id);
-                return Some(TuiAction::Navigate(brain_path));
+                if let Some(brain_path) = backend::session_root_dir(
+                    state.provider,
+                    &session.id,
+                    Some(&state.workspace),
+                    state.app_dir.as_deref(),
+                ) {
+                    return Some(TuiAction::Navigate(brain_path));
+                }
             }
         }
         (KeyModifiers::CONTROL, KeyCode::Char('o')) => {
             if let Some(session) = state.selected_session() {
-                let brain_path = get_brain_root(state.app_dir.as_deref()).join(&session.id);
-                open_in_file_manager(&brain_path);
+                if let Some(brain_path) = backend::session_root_dir(
+                    state.provider,
+                    &session.id,
+                    Some(&state.workspace),
+                    state.app_dir.as_deref(),
+                ) {
+                    open_in_file_manager(&brain_path);
+                }
             }
         }
         (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
@@ -269,14 +282,23 @@ pub fn handle_key_event(state: &mut AppState, key: event::KeyEvent) -> Option<Tu
                 let cur_id = session.id.clone();
                 let was_pinned = session.pinned;
                 if was_pinned {
-                    let _ = remove_pin(Some(&state.workspace), state.app_dir.as_deref());
+                    let _ = backend::remove_pin(
+                        state.provider,
+                        Some(&state.workspace),
+                        state.app_dir.as_deref(),
+                    );
                     for s in &mut state.all_sessions {
                         if s.id == cur_id {
                             s.pinned = false;
                         }
                     }
                 } else {
-                    let _ = set_pin(&cur_id, Some(&state.workspace), state.app_dir.as_deref());
+                    let _ = backend::set_pin(
+                        state.provider,
+                        &cur_id,
+                        Some(&state.workspace),
+                        state.app_dir.as_deref(),
+                    );
                     for s in &mut state.all_sessions {
                         s.pinned = s.id == cur_id;
                     }
@@ -301,23 +323,23 @@ pub fn handle_key_event(state: &mut AppState, key: event::KeyEvent) -> Option<Tu
         }
         (KeyModifiers::CONTROL, KeyCode::Char('a')) => {
             state.all_mode = !state.all_mode;
-            state.all_sessions = fetch_sessions_ext(
+            state.all_sessions = backend::fetch_sessions_ext(
+                state.provider,
                 Some(&state.workspace),
                 state.all_mode,
                 state.show_subagents,
                 state.app_dir.as_deref(),
-                None,
             );
             state.filter_sessions();
         }
         (KeyModifiers::CONTROL, KeyCode::Char('s')) => {
             state.show_subagents = !state.show_subagents;
-            state.all_sessions = fetch_sessions_ext(
+            state.all_sessions = backend::fetch_sessions_ext(
+                state.provider,
                 Some(&state.workspace),
                 state.all_mode,
                 state.show_subagents,
                 state.app_dir.as_deref(),
-                None,
             );
             state.filter_sessions();
         }
@@ -342,6 +364,7 @@ pub fn handle_key_event(state: &mut AppState, key: event::KeyEvent) -> Option<Tu
 }
 
 pub fn run_interactive_tui(
+    provider: ProviderKind,
     sessions: Vec<SessionSummary>,
     workspace: &Path,
     app_dir: Option<&Path>,
@@ -350,10 +373,11 @@ pub fn run_interactive_tui(
     enable_raw_mode()?;
     let mut stderr_handle = stderr();
     execute!(stderr_handle, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stderr_handle);
-    let mut terminal = Terminal::new(backend)?;
+    let term_backend = CrosstermBackend::new(stderr_handle);
+    let mut terminal = Terminal::new(term_backend)?;
 
     let mut state = AppState::new(
+        provider,
         sessions,
         workspace.to_path_buf(),
         app_dir.map(|p| p.to_path_buf()),
@@ -399,11 +423,11 @@ fn main_loop<B: ratatui::backend::Backend>(
                                     state.delete_modal_focus = DeleteModalFocus::Cancel;
                                 } else {
                                     if let Some(session) = state.selected_session() {
-                                        let _ = delete_session(
+                                        let _ = backend::delete_session(
+                                            state.provider,
                                             &session.id,
                                             Some(&state.workspace),
                                             state.app_dir.as_deref(),
-                                            None,
                                         );
                                         let target_id = session.id.clone();
                                         state.all_sessions.retain(|s| s.id != target_id);
@@ -439,17 +463,25 @@ fn main_loop<B: ratatui::backend::Backend>(
                 )
             {
                 if let Some(session) = state.selected_session() {
-                    let brain_path = get_brain_root(state.app_dir.as_deref()).join(&session.id);
-                    let _ = disable_raw_mode();
-                    let _ = execute!(std::io::stderr(), LeaveAlternateScreen, DisableMouseCapture);
-                    let _ = terminal.show_cursor();
+                    if let Some(brain_path) = backend::session_root_dir(
+                        state.provider,
+                        &session.id,
+                        Some(&state.workspace),
+                        state.app_dir.as_deref(),
+                    ) {
+                        let _ = disable_raw_mode();
+                        let _ =
+                            execute!(std::io::stderr(), LeaveAlternateScreen, DisableMouseCapture);
+                        let _ = terminal.show_cursor();
 
-                    let _ = open_in_neovim(&brain_path);
+                        let _ = open_in_neovim(&brain_path);
 
-                    let _ = enable_raw_mode();
-                    let _ = execute!(std::io::stderr(), EnterAlternateScreen, EnableMouseCapture);
-                    let _ = terminal.hide_cursor();
-                    let _ = terminal.clear();
+                        let _ = enable_raw_mode();
+                        let _ =
+                            execute!(std::io::stderr(), EnterAlternateScreen, EnableMouseCapture);
+                        let _ = terminal.hide_cursor();
+                        let _ = terminal.clear();
+                    }
                 }
                 continue;
             }
@@ -569,7 +601,8 @@ pub fn render_ui(f: &mut Frame, state: &mut AppState) {
 
     // Right Preview Card
     let selected_session = state.selected_session();
-    let stats = selected_session.and_then(|s| get_brain_stats(&s.id, state.app_dir.as_deref()));
+    let stats = selected_session
+        .and_then(|s| backend::get_brain_stats(state.provider, &s.id, state.app_dir.as_deref()));
 
     let preview_widget = render_tui_preview(selected_session, stats.as_ref());
     f.render_widget(preview_widget, middle_chunks[1]);

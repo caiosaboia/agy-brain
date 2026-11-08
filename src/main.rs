@@ -1,3 +1,5 @@
+mod backend;
+mod claude_code;
 mod cli;
 mod core;
 mod shells;
@@ -8,25 +10,17 @@ use clap::Parser;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use backend::ProviderKind;
 use cli::{Cli, Commands};
-use core::{
-    delete_session, fetch_sessions_ext, get_brain_root, get_brain_stats, get_db_path,
-    get_default_app_dir, get_pinned_id_for_workspace, prune_sessions, remove_pin, rename_session,
-    resolve_brain_target, set_pin,
-};
 use shells::{get_shell_integration, install_shell_integration};
 use tui::{run_interactive_tui, TuiAction};
 use ui::{
-    list_artifacts, open_in_editor, open_in_file_manager, open_in_neovim, render_preview,
-    render_table, CYAN, GREEN, RED, RESET, WHITE, YELLOW,
+    list_artifacts, list_artifacts_from_stats, open_in_editor, open_in_file_manager,
+    open_in_neovim, render_preview, render_table, CYAN, GREEN, RED, RESET, WHITE, YELLOW,
 };
 
-fn run_doctor(app_dir: Option<&Path>) {
-    let target_app = app_dir
-        .map(PathBuf::from)
-        .unwrap_or_else(get_default_app_dir);
-    let db_file = get_db_path(Some(&target_app));
-    let brain_dir = get_brain_root(Some(&target_app));
+fn run_doctor(provider: ProviderKind, app_dir: Option<&Path>) {
+    let cur_ws = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     println!(
         "\n{CYAN}+------------------------------------------------------------------------+{RESET}"
@@ -37,53 +31,104 @@ fn run_doctor(app_dir: Option<&Path>) {
     println!(
         "{CYAN}+------------------------------------------------------------------------+{RESET}\n"
     );
+    println!(
+        "  {GREEN}[OK]{RESET} Provider selecionado: {}",
+        provider.label()
+    );
 
-    if target_app.is_dir() {
-        println!(
-            "  {GREEN}[OK]{RESET} Diretorio Antigravity: {}",
-            target_app.display()
-        );
-    } else {
-        println!(
-            "  {RED}[X]{RESET}  Diretorio Antigravity nao encontrado: {}",
-            target_app.display()
-        );
+    match provider {
+        ProviderKind::Antigravity => {
+            let target_app = app_dir
+                .map(PathBuf::from)
+                .unwrap_or_else(core::get_default_app_dir);
+            let db_file = core::get_db_path(Some(&target_app));
+            let brain_dir = core::get_brain_root(Some(&target_app));
+
+            if target_app.is_dir() {
+                println!(
+                    "  {GREEN}[OK]{RESET} Diretorio Antigravity: {}",
+                    target_app.display()
+                );
+            } else {
+                println!(
+                    "  {RED}[X]{RESET}  Diretorio Antigravity nao encontrado: {}",
+                    target_app.display()
+                );
+            }
+
+            if db_file.is_file() {
+                println!(
+                    "  {GREEN}[OK]{RESET} Banco de dados SQLite: {}",
+                    db_file.display()
+                );
+                let root_sessions =
+                    core::fetch_sessions_ext(None, true, false, Some(&target_app), None);
+                let all_sessions =
+                    core::fetch_sessions_ext(None, true, true, Some(&target_app), None);
+                let sub_count = all_sessions.len().saturating_sub(root_sessions.len());
+                println!(
+                    "  {GREEN}[OK]{RESET} Sessoes principais: {} (Subagentes: {})",
+                    root_sessions.len(),
+                    sub_count
+                );
+            } else {
+                println!(
+                    "  {RED}[X]{RESET}  Banco SQLite nao encontrado em: {}",
+                    db_file.display()
+                );
+            }
+
+            if brain_dir.is_dir() {
+                println!(
+                    "  {GREEN}[OK]{RESET} Pasta de cerebros: {}",
+                    brain_dir.display()
+                );
+            } else {
+                println!(
+                    "  {YELLOW}[!]{RESET} Pasta de cerebros ainda nao existe: {}",
+                    brain_dir.display()
+                );
+            }
+        }
+        ProviderKind::ClaudeCode => {
+            let target_app = app_dir
+                .map(PathBuf::from)
+                .unwrap_or_else(claude_code::get_default_app_dir);
+            let projects_root = claude_code::get_projects_root(Some(&target_app));
+
+            if target_app.is_dir() {
+                println!(
+                    "  {GREEN}[OK]{RESET} Diretorio Claude Code: {}",
+                    target_app.display()
+                );
+            } else {
+                println!(
+                    "  {RED}[X]{RESET}  Diretorio Claude Code nao encontrado: {}",
+                    target_app.display()
+                );
+            }
+
+            if projects_root.is_dir() {
+                println!(
+                    "  {GREEN}[OK]{RESET} Pasta de projetos: {}",
+                    projects_root.display()
+                );
+                let sessions =
+                    claude_code::fetch_sessions_ext(None, true, false, Some(&target_app));
+                println!(
+                    "  {GREEN}[OK]{RESET} Sessoes encontradas: {}",
+                    sessions.len()
+                );
+            } else {
+                println!(
+                    "  {RED}[X]{RESET}  Pasta de projetos nao encontrada em: {}",
+                    projects_root.display()
+                );
+            }
+        }
     }
 
-    if db_file.is_file() {
-        println!(
-            "  {GREEN}[OK]{RESET} Banco de dados SQLite: {}",
-            db_file.display()
-        );
-        let root_sessions = fetch_sessions_ext(None, true, false, Some(&target_app), None);
-        let all_sessions = fetch_sessions_ext(None, true, true, Some(&target_app), None);
-        let sub_count = all_sessions.len().saturating_sub(root_sessions.len());
-        println!(
-            "  {GREEN}[OK]{RESET} Sessoes principais: {} (Subagentes: {})",
-            root_sessions.len(),
-            sub_count
-        );
-    } else {
-        println!(
-            "  {RED}[X]{RESET}  Banco SQLite nao encontrado em: {}",
-            db_file.display()
-        );
-    }
-
-    if brain_dir.is_dir() {
-        println!(
-            "  {GREEN}[OK]{RESET} Pasta de cerebros: {}",
-            brain_dir.display()
-        );
-    } else {
-        println!(
-            "  {YELLOW}[!]{RESET} Pasta de cerebros ainda nao existe: {}",
-            brain_dir.display()
-        );
-    }
-
-    let cur_ws = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    if let Some(pin) = get_pinned_id_for_workspace(Some(&cur_ws), Some(&target_app)) {
+    if let Some(pin) = backend::get_pinned_id_for_workspace(provider, Some(&cur_ws), app_dir) {
         println!("  {GREEN}[OK]{RESET} Workspace atual fixado no cerebro: {pin}");
     } else {
         println!(
@@ -98,12 +143,19 @@ fn main() -> ExitCode {
     let args = Cli::parse();
     let app_dir = args.app_dir.as_deref();
     let cur_ws = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let provider = backend::resolve_provider(args.provider, app_dir);
 
     match args.command {
         None | Some(Commands::Tui) => {
-            let sessions = fetch_sessions_ext(Some(&cur_ws), false, args.subagents, app_dir, None);
+            let sessions = backend::fetch_sessions_ext(
+                provider,
+                Some(&cur_ws),
+                false,
+                args.subagents,
+                app_dir,
+            );
 
-            match run_interactive_tui(sessions, &cur_ws, app_dir, args.subagents) {
+            match run_interactive_tui(provider, sessions, &cur_ws, app_dir, args.subagents) {
                 Ok(TuiAction::Navigate(path)) => {
                     if let Some(tf) = &args.target_file {
                         let _ = std::fs::write(tf, path.to_string_lossy().as_bytes());
@@ -120,49 +172,62 @@ fn main() -> ExitCode {
         }
 
         Some(Commands::Resolve { target }) => {
-            if let Some(bid) = resolve_brain_target(target.as_deref(), Some(&cur_ws), app_dir) {
-                let p = get_brain_root(app_dir).join(bid);
-                println!("{}", p.display());
-                ExitCode::SUCCESS
-            } else {
-                ExitCode::FAILURE
+            match backend::resolve_brain_target(provider, target.as_deref(), Some(&cur_ws), app_dir)
+                .and_then(|bid| backend::session_root_dir(provider, &bid, Some(&cur_ws), app_dir))
+            {
+                Some(p) => {
+                    println!("{}", p.display());
+                    ExitCode::SUCCESS
+                }
+                None => ExitCode::FAILURE,
             }
         }
 
         Some(Commands::Go { target }) => {
-            if let Some(bid) = resolve_brain_target(target.as_deref(), Some(&cur_ws), app_dir) {
-                let p = get_brain_root(app_dir).join(bid);
-                println!("{}", p.display());
-                ExitCode::SUCCESS
-            } else {
-                eprintln!("{RED}[!] Nenhum cerebro encontrado para resolver.{RESET}");
-                ExitCode::FAILURE
+            match backend::resolve_brain_target(provider, target.as_deref(), Some(&cur_ws), app_dir)
+                .and_then(|bid| backend::session_root_dir(provider, &bid, Some(&cur_ws), app_dir))
+            {
+                Some(p) => {
+                    println!("{}", p.display());
+                    ExitCode::SUCCESS
+                }
+                None => {
+                    eprintln!("{RED}[!] Nenhum cerebro encontrado para resolver.{RESET}");
+                    ExitCode::FAILURE
+                }
             }
         }
 
         Some(Commands::List { all }) => {
-            let sessions = fetch_sessions_ext(Some(&cur_ws), all, args.subagents, app_dir, None);
+            let sessions =
+                backend::fetch_sessions_ext(provider, Some(&cur_ws), all, args.subagents, app_dir);
             render_table(&sessions);
             ExitCode::SUCCESS
         }
 
         Some(Commands::Info { target }) => {
-            let bid = match resolve_brain_target(target.as_deref(), Some(&cur_ws), app_dir) {
+            let bid = match backend::resolve_brain_target(
+                provider,
+                target.as_deref(),
+                Some(&cur_ws),
+                app_dir,
+            ) {
                 Some(b) => b,
                 None => {
                     eprintln!("{RED}[!] Cerebro nao encontrado.{RESET}");
                     return ExitCode::FAILURE;
                 }
             };
-            let sessions = fetch_sessions_ext(Some(&cur_ws), true, true, app_dir, None);
+            let sessions =
+                backend::fetch_sessions_ext(provider, Some(&cur_ws), true, true, app_dir);
             let session = sessions.iter().find(|s| s.id == bid);
-            let stats = get_brain_stats(&bid, app_dir);
+            let stats = backend::get_brain_stats(provider, &bid, app_dir);
             render_preview(session, stats.as_ref(), &bid);
             ExitCode::SUCCESS
         }
 
         Some(Commands::Rename { target, title }) => {
-            match rename_session(&target, &title, Some(&cur_ws), app_dir, None) {
+            match backend::rename_session(provider, &target, &title, Some(&cur_ws), app_dir) {
                 Ok((resolved_id, saved_title)) => {
                     println!(
                         "{GREEN}[OK] Sessao {resolved_id} renomeada para: \"{saved_title}\"{RESET}"
@@ -176,57 +241,79 @@ fn main() -> ExitCode {
             }
         }
 
-        Some(Commands::Prune { dry_run }) => match prune_sessions(dry_run, app_dir, None) {
-            Ok(pruned) => {
-                if pruned.is_empty() {
-                    println!("{GREEN}[OK] Nenhuma sessao fantasma encontrada.{RESET}");
-                } else if dry_run {
-                    println!(
-                        "{YELLOW}[DRY-RUN] {} sessoes fantasmas seriam removidas:{RESET}",
-                        pruned.len()
-                    );
-                    for p in &pruned {
-                        println!("  - {} ({} passos, {})", p.id, p.steps, p.mtime);
+        Some(Commands::Prune { dry_run }) => {
+            match backend::prune_sessions(provider, dry_run, app_dir) {
+                Ok(pruned) => {
+                    if pruned.is_empty() {
+                        println!("{GREEN}[OK] Nenhuma sessao fantasma encontrada.{RESET}");
+                    } else if dry_run {
+                        println!(
+                            "{YELLOW}[DRY-RUN] {} sessoes fantasmas seriam removidas:{RESET}",
+                            pruned.len()
+                        );
+                        for p in &pruned {
+                            println!("  - {} ({} passos, {})", p.id, p.steps, p.mtime);
+                        }
+                    } else {
+                        println!(
+                            "{GREEN}[OK] {} sessoes fantasmas removidas com sucesso:{RESET}",
+                            pruned.len()
+                        );
+                        for p in &pruned {
+                            println!("  - {}", p.id);
+                        }
                     }
-                } else {
-                    println!(
-                        "{GREEN}[OK] {} sessoes fantasmas removidas com sucesso:{RESET}",
-                        pruned.len()
-                    );
-                    for p in &pruned {
-                        println!("  - {}", p.id);
-                    }
+                    ExitCode::SUCCESS
                 }
-                ExitCode::SUCCESS
+                Err(err) => {
+                    eprintln!("{RED}[!] Erro ao limpar sessoes fantasmas: {err}{RESET}");
+                    ExitCode::FAILURE
+                }
             }
-            Err(err) => {
-                eprintln!("{RED}[!] Erro ao limpar sessoes fantasmas: {err}{RESET}");
-                ExitCode::FAILURE
-            }
-        },
+        }
 
         Some(Commands::Artifacts { target }) => {
-            let bid = match resolve_brain_target(target.as_deref(), Some(&cur_ws), app_dir) {
+            let bid = match backend::resolve_brain_target(
+                provider,
+                target.as_deref(),
+                Some(&cur_ws),
+                app_dir,
+            ) {
                 Some(b) => b,
                 None => {
                     eprintln!("{RED}[!] Cerebro nao encontrado.{RESET}");
                     return ExitCode::FAILURE;
                 }
             };
-            let stats = get_brain_stats(&bid, app_dir);
-            list_artifacts(&bid, stats.as_ref());
+            let stats = backend::get_brain_stats(provider, &bid, app_dir);
+            match provider {
+                ProviderKind::Antigravity => list_artifacts(&bid, stats.as_ref()),
+                ProviderKind::ClaudeCode => list_artifacts_from_stats(&bid, stats.as_ref()),
+            }
             ExitCode::SUCCESS
         }
 
         Some(Commands::Open { target }) => {
-            let bid = match resolve_brain_target(target.as_deref(), Some(&cur_ws), app_dir) {
+            let bid = match backend::resolve_brain_target(
+                provider,
+                target.as_deref(),
+                Some(&cur_ws),
+                app_dir,
+            ) {
                 Some(b) => b,
                 None => {
                     eprintln!("{RED}[!] Cerebro nao encontrado.{RESET}");
                     return ExitCode::FAILURE;
                 }
             };
-            let brain_path = get_brain_root(app_dir).join(&bid);
+            let brain_path = match backend::session_root_dir(provider, &bid, Some(&cur_ws), app_dir)
+            {
+                Some(p) => p,
+                None => {
+                    eprintln!("{RED}[!] Diretorio da sessao nao encontrado.{RESET}");
+                    return ExitCode::FAILURE;
+                }
+            };
             if open_in_file_manager(&brain_path) {
                 println!("{GREEN}[OK] Abrindo cerebro no gerenciador de arquivos: {bid}{RESET}");
                 ExitCode::SUCCESS
@@ -240,14 +327,26 @@ fn main() -> ExitCode {
         }
 
         Some(Commands::Edit { target }) => {
-            let bid = match resolve_brain_target(target.as_deref(), Some(&cur_ws), app_dir) {
+            let bid = match backend::resolve_brain_target(
+                provider,
+                target.as_deref(),
+                Some(&cur_ws),
+                app_dir,
+            ) {
                 Some(b) => b,
                 None => {
                     eprintln!("{RED}[!] Cerebro nao encontrado.{RESET}");
                     return ExitCode::FAILURE;
                 }
             };
-            let brain_path = get_brain_root(app_dir).join(&bid);
+            let brain_path = match backend::session_root_dir(provider, &bid, Some(&cur_ws), app_dir)
+            {
+                Some(p) => p,
+                None => {
+                    eprintln!("{RED}[!] Diretorio da sessao nao encontrado.{RESET}");
+                    return ExitCode::FAILURE;
+                }
+            };
             if open_in_editor(&brain_path) {
                 ExitCode::SUCCESS
             } else {
@@ -260,14 +359,26 @@ fn main() -> ExitCode {
         }
 
         Some(Commands::Nvim { target }) => {
-            let bid = match resolve_brain_target(target.as_deref(), Some(&cur_ws), app_dir) {
+            let bid = match backend::resolve_brain_target(
+                provider,
+                target.as_deref(),
+                Some(&cur_ws),
+                app_dir,
+            ) {
                 Some(b) => b,
                 None => {
                     eprintln!("{RED}[!] Nenhum cerebro encontrado para abrir com Neovim.{RESET}");
                     return ExitCode::FAILURE;
                 }
             };
-            let brain_path = get_brain_root(app_dir).join(&bid);
+            let brain_path = match backend::session_root_dir(provider, &bid, Some(&cur_ws), app_dir)
+            {
+                Some(p) => p,
+                None => {
+                    eprintln!("{RED}[!] Diretorio da sessao nao encontrado.{RESET}");
+                    return ExitCode::FAILURE;
+                }
+            };
             if open_in_neovim(&brain_path) {
                 ExitCode::SUCCESS
             } else {
@@ -280,14 +391,19 @@ fn main() -> ExitCode {
         }
 
         Some(Commands::Pin { target }) => {
-            let bid = match resolve_brain_target(target.as_deref(), Some(&cur_ws), app_dir) {
+            let bid = match backend::resolve_brain_target(
+                provider,
+                target.as_deref(),
+                Some(&cur_ws),
+                app_dir,
+            ) {
                 Some(b) => b,
                 None => {
                     eprintln!("{RED}[!] Informe um ID de sessao valido para fixar.{RESET}");
                     return ExitCode::FAILURE;
                 }
             };
-            if let Err(e) = set_pin(&bid, Some(&cur_ws), app_dir) {
+            if let Err(e) = backend::set_pin(provider, &bid, Some(&cur_ws), app_dir) {
                 eprintln!("{RED}[!] Erro ao salvar fixacao: {e}{RESET}");
                 ExitCode::FAILURE
             } else {
@@ -299,7 +415,7 @@ fn main() -> ExitCode {
         }
 
         Some(Commands::Unpin) => {
-            if remove_pin(Some(&cur_ws), app_dir) {
+            if backend::remove_pin(provider, Some(&cur_ws), app_dir) {
                 println!("{YELLOW}[OK] Fixacao removida do workspace atual.{RESET}");
             } else {
                 println!("{WHITE}[i] Nenhuma fixacao encontrada para este workspace.{RESET}");
@@ -309,7 +425,12 @@ fn main() -> ExitCode {
 
         Some(Commands::Delete { target, force }) => {
             let target_str = target.as_deref().unwrap_or("default");
-            let resolved_id = match resolve_brain_target(Some(target_str), Some(&cur_ws), app_dir) {
+            let resolved_id = match backend::resolve_brain_target(
+                provider,
+                Some(target_str),
+                Some(&cur_ws),
+                app_dir,
+            ) {
                 Some(id) => id,
                 None => {
                     eprintln!(
@@ -319,7 +440,9 @@ fn main() -> ExitCode {
                 }
             };
 
-            let brain_path = get_brain_root(app_dir).join(&resolved_id);
+            let brain_path =
+                backend::session_root_dir(provider, &resolved_id, Some(&cur_ws), app_dir)
+                    .unwrap_or_else(|| PathBuf::from("(desconhecido)"));
 
             if !force {
                 println!(
@@ -364,17 +487,29 @@ fn main() -> ExitCode {
                 }
             }
 
-            match delete_session(&resolved_id, Some(&cur_ws), app_dir, None) {
+            match backend::delete_session(provider, &resolved_id, Some(&cur_ws), app_dir) {
                 Ok(res) => {
                     println!(
                         "{GREEN}[OK] Sessao {} apagada com sucesso!{RESET}",
                         res.conversation_id
                     );
-                    if res.db_deleted {
-                        println!("  [OK] Registro removido do SQLite.");
-                    }
-                    if res.folder_deleted {
-                        println!("  [OK] Pasta do cerebro removida do disco.");
+                    match provider {
+                        ProviderKind::Antigravity => {
+                            if res.db_deleted {
+                                println!("  [OK] Registro removido do SQLite.");
+                            }
+                            if res.folder_deleted {
+                                println!("  [OK] Pasta do cerebro removida do disco.");
+                            }
+                        }
+                        ProviderKind::ClaudeCode => {
+                            if res.db_deleted {
+                                println!("  [OK] Transcript removido do disco.");
+                            }
+                            if res.folder_deleted {
+                                println!("  [OK] Arquivos de todo removidos.");
+                            }
+                        }
                     }
                     if res.pins_removed {
                         println!("  [OK] Fixacoes desvinculadas.");
@@ -410,7 +545,7 @@ fn main() -> ExitCode {
         }
 
         Some(Commands::Doctor) => {
-            run_doctor(app_dir);
+            run_doctor(provider, app_dir);
             ExitCode::SUCCESS
         }
     }

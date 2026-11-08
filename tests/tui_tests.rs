@@ -9,12 +9,22 @@ use tempfile::tempdir;
 #[path = "../src/core.rs"]
 mod core;
 
+#[path = "../src/claude_code.rs"]
+mod claude_code;
+
+#[path = "../src/cli.rs"]
+mod cli;
+
+#[path = "../src/backend.rs"]
+mod backend;
+
 #[path = "../src/ui.rs"]
 mod ui;
 
 #[path = "../src/tui.rs"]
 mod tui;
 
+use backend::ProviderKind;
 use core::fetch_sessions_ext;
 use tui::{handle_key_event, render_ui, AppState, DeleteModalFocus, TuiAction};
 
@@ -93,7 +103,13 @@ fn test_tui_initial_render_and_split_layout() {
     let sessions = fetch_sessions_ext(Some(&ws_dir), false, false, Some(&app_dir), Some(&db_path));
     assert_eq!(sessions.len(), 2);
 
-    let mut state = AppState::new(sessions, ws_dir, Some(app_dir), false);
+    let mut state = AppState::new(
+        ProviderKind::Antigravity,
+        sessions,
+        ws_dir,
+        Some(app_dir),
+        false,
+    );
     let backend = TestBackend::new(120, 35);
     let mut terminal = Terminal::new(backend).unwrap();
 
@@ -113,7 +129,13 @@ fn test_tui_initial_render_and_split_layout() {
 fn test_tui_search_filtering_and_navigation() {
     let (_tmp, app_dir, ws_dir, db_path) = setup_test_db();
     let sessions = fetch_sessions_ext(Some(&ws_dir), false, false, Some(&app_dir), Some(&db_path));
-    let mut state = AppState::new(sessions, ws_dir, Some(app_dir.clone()), false);
+    let mut state = AppState::new(
+        ProviderKind::Antigravity,
+        sessions,
+        ws_dir,
+        Some(app_dir.clone()),
+        false,
+    );
 
     // Initially first session is selected
     assert_eq!(
@@ -167,7 +189,13 @@ fn test_tui_search_filtering_and_navigation() {
 fn test_tui_pin_and_unpin_toggle() {
     let (_tmp, app_dir, ws_dir, db_path) = setup_test_db();
     let sessions = fetch_sessions_ext(Some(&ws_dir), false, false, Some(&app_dir), Some(&db_path));
-    let mut state = AppState::new(sessions, ws_dir.clone(), Some(app_dir), false);
+    let mut state = AppState::new(
+        ProviderKind::Antigravity,
+        sessions,
+        ws_dir.clone(),
+        Some(app_dir),
+        false,
+    );
 
     assert!(!state.selected_session().unwrap().pinned);
     assert!(!ws_dir.join(".brain").exists());
@@ -193,7 +221,13 @@ fn test_tui_pin_and_unpin_toggle() {
 fn test_tui_subagents_and_all_mode_toggles() {
     let (_tmp, app_dir, ws_dir, db_path) = setup_test_db();
     let sessions = fetch_sessions_ext(Some(&ws_dir), false, false, Some(&app_dir), Some(&db_path));
-    let mut state = AppState::new(sessions, ws_dir, Some(app_dir), false);
+    let mut state = AppState::new(
+        ProviderKind::Antigravity,
+        sessions,
+        ws_dir,
+        Some(app_dir),
+        false,
+    );
 
     assert_eq!(state.all_sessions.len(), 2);
 
@@ -218,7 +252,13 @@ fn test_tui_subagents_and_all_mode_toggles() {
 fn test_tui_rename_and_delete_modals() {
     let (_tmp, app_dir, ws_dir, db_path) = setup_test_db();
     let sessions = fetch_sessions_ext(Some(&ws_dir), false, false, Some(&app_dir), Some(&db_path));
-    let mut state = AppState::new(sessions, ws_dir, Some(app_dir), false);
+    let mut state = AppState::new(
+        ProviderKind::Antigravity,
+        sessions,
+        ws_dir,
+        Some(app_dir),
+        false,
+    );
     let backend = TestBackend::new(120, 35);
     let mut terminal = Terminal::new(backend).unwrap();
 

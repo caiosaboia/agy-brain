@@ -1,20 +1,36 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum ProviderArg {
+    Auto,
+    Antigravity,
+    ClaudeCode,
+}
 
 #[derive(Parser, Debug)]
 #[command(
     name = "agy-brain",
     version,
-    about = "Universal, standalone cross-platform CLI navigator and session inspector for Antigravity Brains",
+    about = "Universal, standalone cross-platform CLI navigator and session inspector for Antigravity Brains and Claude Code",
     long_about = None
 )]
 pub struct Cli {
     #[arg(
         long,
         global = true,
-        help = "Override Antigravity application directory"
+        help = "Override Antigravity/Claude Code application directory"
     )]
     pub app_dir: Option<PathBuf>,
+
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        help = "Session backend to use: auto (default), antigravity, claude-code. Also settable via AGY_PROVIDER"
+    )]
+    pub provider: Option<ProviderArg>,
 
     #[arg(
         long,
