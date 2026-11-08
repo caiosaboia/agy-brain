@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub const BASH_INTEGRATION: &str = r#"# agy-brain shell integration for Bash
 agy-brain() {
@@ -182,8 +182,11 @@ pub fn get_shell_integration(shell_name: &str) -> Option<&'static str> {
     }
 }
 
-pub fn detect_active_shell_and_rc() -> (&'static str, PathBuf) {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+pub fn detect_active_shell_and_rc_in_home(custom_home: Option<&Path>) -> (&'static str, PathBuf) {
+    let home = custom_home
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| PathBuf::from("."));
 
     #[cfg(target_os = "windows")]
     {
@@ -211,8 +214,18 @@ pub fn detect_active_shell_and_rc() -> (&'static str, PathBuf) {
 }
 
 pub fn install_shell_integration(target_shell: Option<&str>) -> (bool, String) {
+    install_shell_integration_in_home(target_shell, None)
+}
+
+pub fn install_shell_integration_in_home(
+    target_shell: Option<&str>,
+    custom_home: Option<&Path>,
+) -> (bool, String) {
     let (shell_name, rc_file) = if let Some(s) = target_shell {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        let home = custom_home
+            .map(PathBuf::from)
+            .or_else(dirs::home_dir)
+            .unwrap_or_else(|| PathBuf::from("."));
         let norm = s.to_lowercase();
         let path = if norm.contains("power") || norm == "pwsh" {
             home.join("Documents")
@@ -227,7 +240,7 @@ pub fn install_shell_integration(target_shell: Option<&str>) -> (bool, String) {
         };
         (s.to_string(), path)
     } else {
-        let (s, p) = detect_active_shell_and_rc();
+        let (s, p) = detect_active_shell_and_rc_in_home(custom_home);
         (s.to_string(), p)
     };
 

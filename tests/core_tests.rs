@@ -19,7 +19,7 @@ fn test_normalize_workspace_path() {
         if cfg!(target_os = "windows") {
             "c:/users/test/project"
         } else {
-            "C:/Users/test/project"
+            "c:/Users/test/project"
         }
     );
     assert_eq!(
@@ -27,11 +27,15 @@ fn test_normalize_workspace_path() {
         if cfg!(target_os = "windows") {
             "c:/users/test/project"
         } else {
-            "C:/Users/test/project"
+            "c:/Users/test/project"
         }
     );
     assert_eq!(
         normalize_workspace_path("file:///home/user/code/"),
+        "home/user/code"
+    );
+    assert_eq!(
+        normalize_workspace_path("/home/user/code/"),
         "home/user/code"
     );
     assert_eq!(normalize_workspace_path(""), "");

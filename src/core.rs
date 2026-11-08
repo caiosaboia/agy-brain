@@ -169,18 +169,29 @@ pub fn normalize_workspace_path(path_str: &str) -> String {
     }
     let decoded = decode_percent_encoding(path_str.trim());
     let mut clean = decoded.as_str();
-    if clean.starts_with("file:///") {
-        clean = &clean[8..];
-    } else if clean.starts_with("file://") {
-        clean = &clean[7..];
+    if let Some(stripped) = clean.strip_prefix("file:///") {
+        clean = stripped;
+    } else if let Some(stripped) = clean.strip_prefix("file://") {
+        clean = stripped;
     }
     let mut s = clean.replace('\\', "/");
-    while s.ends_with('/') && s.len() > 1 {
+    while s.starts_with('/') {
+        s.remove(0);
+    }
+    while s.ends_with('/') && !s.is_empty() {
         s.pop();
     }
     #[cfg(target_os = "windows")]
     {
         s = s.to_lowercase();
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        if s.len() >= 2 && s.as_bytes()[0].is_ascii_alphabetic() && s.as_bytes()[1] == b':' {
+            let mut chars: Vec<char> = s.chars().collect();
+            chars[0] = chars[0].to_ascii_lowercase();
+            s = chars.into_iter().collect();
+        }
     }
     s
 }
@@ -773,7 +784,9 @@ pub fn resolve_brain_target(
         if idx < sessions.len() {
             return Some(sessions[idx].id.clone());
         }
-        return None;
+        if t.len() < 4 {
+            return None;
+        }
     }
 
     if t == "default" {
