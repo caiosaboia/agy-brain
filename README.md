@@ -25,9 +25,9 @@
 ## Demo
 
 <p align="center">
-  <video src="docs/assets/demo.mp4" controls="controls" width="100%" style="max-width: 800px;">
-    Seu navegador não suporta a tag de vídeo.
-  </video>
+  <img src="docs/assets/demo.gif" alt="brain interactive demo" width="100%" style="max-width: 900px;" />
+  <br>
+  <em>Navegação rápida de workspaces, inspeção de sessões e TUI interativa (<a href="docs/assets/demo.mp4">assistir em vídeo MP4 original</a>).</em>
 </p>
 
 ---
