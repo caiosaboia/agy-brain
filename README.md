@@ -22,6 +22,16 @@
 
 ---
 
+## Demo
+
+<p align="center">
+  <video src="docs/assets/demo.mp4" controls="controls" width="100%" style="max-width: 800px;">
+    Seu navegador não suporta a tag de vídeo.
+  </video>
+</p>
+
+---
+
 ## Session Backends
 
 agy-brain supports two providers behind the same command surface:
