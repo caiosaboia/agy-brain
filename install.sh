@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Shell installation script for agy-brain on Linux and macOS
+# Shell installation script for brain on Linux and macOS
 set -euo pipefail
 
 REPO="caiosaboia/agy-brain"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 VERSION="${1:-latest}"
 
-echo "Installing agy-brain..."
+echo "Installing brain..."
 mkdir -p "$INSTALL_DIR"
 
 OS="$(uname -s)"
@@ -41,7 +41,11 @@ if [ -n "$ASSET_NAME" ]; then
     TMP_DIR="$(mktemp -d)"
     if curl -sSLf "$URL" -o "$TMP_DIR/$ASSET_NAME"; then
         tar -xzf "$TMP_DIR/$ASSET_NAME" -C "$INSTALL_DIR"
-        chmod +x "$INSTALL_DIR/agy-brain"
+        if [ -f "$INSTALL_DIR/agy-brain" ] && [ ! -f "$INSTALL_DIR/brain" ]; then
+            cp "$INSTALL_DIR/agy-brain" "$INSTALL_DIR/brain"
+        fi
+        chmod +x "$INSTALL_DIR/brain" 2>/dev/null || true
+        chmod +x "$INSTALL_DIR/agy-brain" 2>/dev/null || true
         rm -rf "$TMP_DIR"
         INSTALLED=1
     else
@@ -61,13 +65,24 @@ if [ "$INSTALLED" -eq 0 ]; then
     fi
 fi
 
+# Ensure both brain and agy-brain exist in INSTALL_DIR
+if [ -f "$INSTALL_DIR/brain" ] && [ ! -f "$INSTALL_DIR/agy-brain" ]; then
+    ln -sf "$INSTALL_DIR/brain" "$INSTALL_DIR/agy-brain"
+elif [ -f "$INSTALL_DIR/agy-brain" ] && [ ! -f "$INSTALL_DIR/brain" ]; then
+    ln -sf "$INSTALL_DIR/agy-brain" "$INSTALL_DIR/brain"
+fi
+
 # Determine running shell
 DETECTED_SHELL="$(basename "$SHELL")"
-if command -v agy-brain >/dev/null 2>&1; then
+if command -v brain >/dev/null 2>&1; then
+    brain install "$DETECTED_SHELL"
+elif [ -x "$INSTALL_DIR/brain" ]; then
+    "$INSTALL_DIR/brain" install "$DETECTED_SHELL"
+elif command -v agy-brain >/dev/null 2>&1; then
     agy-brain install "$DETECTED_SHELL"
 elif [ -x "$INSTALL_DIR/agy-brain" ]; then
     "$INSTALL_DIR/agy-brain" install "$DETECTED_SHELL"
 fi
 
-echo "agy-brain installation completed successfully."
+echo "brain installation completed successfully."
 echo "Restart your shell or run 'source ~/.${DETECTED_SHELL}rc' to begin."

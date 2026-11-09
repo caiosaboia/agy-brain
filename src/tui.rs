@@ -48,6 +48,7 @@ pub struct AppState {
     pub modal_rect: Option<Rect>,
     pub renaming: bool,
     pub rename_input: String,
+    pub show_help: bool,
 }
 
 impl AppState {
@@ -78,6 +79,7 @@ impl AppState {
             modal_rect: None,
             renaming: false,
             rename_input: String::new(),
+            show_help: false,
         }
     }
 
@@ -143,6 +145,23 @@ impl AppState {
 
 pub fn handle_key_event(state: &mut AppState, key: event::KeyEvent) -> Option<TuiAction> {
     if key.kind != event::KeyEventKind::Press {
+        return None;
+    }
+
+    if state.show_help {
+        match (key.modifiers, key.code) {
+            (
+                KeyModifiers::NONE,
+                KeyCode::Char('?') | KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q'),
+            )
+            | (KeyModifiers::SHIFT, KeyCode::Char('?'))
+            | (KeyModifiers::NONE, KeyCode::F(1)) => {
+                state.show_help = false;
+            }
+            _ => {
+                state.show_help = false;
+            }
+        }
         return None;
     }
 
@@ -349,6 +368,10 @@ pub fn handle_key_event(state: &mut AppState, key: event::KeyEvent) -> Option<Tu
         (KeyModifiers::NONE, KeyCode::Down) => {
             state.next();
         }
+        (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char('?'))
+        | (KeyModifiers::NONE, KeyCode::F(1)) => {
+            state.show_help = true;
+        }
         (KeyModifiers::NONE, KeyCode::Backspace) => {
             state.search_query.pop();
             state.filter_sessions();
@@ -407,6 +430,12 @@ fn main_loop<B: ratatui::backend::Backend>(
         let event = event::read()?;
 
         if let Event::Mouse(mouse) = &event {
+            if state.show_help {
+                if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                    state.show_help = false;
+                }
+                continue;
+            }
             if state.confirm_delete {
                 if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
                     if let Some(rect) = state.modal_rect {
@@ -618,7 +647,15 @@ pub fn render_ui(f: &mut Frame, state: &mut AppState) {
         ),
         Span::raw(" Ir "),
         Span::styled(
-            " [Ctrl+E/F2] ",
+            " [?] ",
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" Ajuda "),
+        Span::styled(
+            " [Ctrl+E] ",
             Style::default()
                 .fg(Color::Black)
                 .bg(Color::Rgb(80, 220, 140))
@@ -640,7 +677,7 @@ pub fn render_ui(f: &mut Frame, state: &mut AppState) {
                 .bg(Color::Rgb(200, 140, 255))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(" Subagentes "),
+        Span::raw(" Subs "),
         Span::styled(
             " [Ctrl+P] ",
             Style::default()
@@ -833,9 +870,193 @@ pub fn render_ui(f: &mut Frame, state: &mut AppState) {
             .block(block)
             .alignment(ratatui::layout::Alignment::Center);
         f.render_widget(p, area);
+    } else if state.show_help {
+        render_help_modal(f, state);
     } else {
         state.modal_rect = None;
     }
+}
+
+fn render_help_modal(f: &mut Frame, state: &mut AppState) {
+    let area = centered_rect(72, 76, f.area());
+    state.modal_rect = Some(area);
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .title(Span::styled(
+            " AJUDA - COMANDOS E ATALHOS DO BRAIN ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+    let rows = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(
+                " [Setas Cima / Baixo] ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  Navegar pela lista de sessoes / historico"),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " [Enter]              ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  Ir para a pasta do cerebro selecionado (Set-Location / cd)"),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " [Ctrl+E] ou [F2]     ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Rgb(80, 220, 140))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  Abrir sessao e artefatos diretamente no Neovim"),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " [Ctrl+O]             ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Rgb(80, 220, 140))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  Abrir diretorio no explorador de arquivos (Explorer / Finder)"),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " [Ctrl+R]             ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Rgb(120, 180, 255))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  Renomear o titulo customizado da sessao selecionada"),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " [Ctrl+P]             ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  Fixar / desafixar sessao para o workspace atual (Pin/Unpin)"),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " [Ctrl+S]             ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Rgb(200, 140, 255))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  Alternar exibicao de subagentes (conversas filhas)"),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " [Ctrl+A]             ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  Alternar entre workspace atual e todos os projetos"),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " [Ctrl+D]             ",
+                Style::default()
+                    .fg(Color::White)
+                    .bg(Color::Red)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  Excluir sessao selecionada (solicita confirmacao)"),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " [Texto digitado]     ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  Filtro instantaneo por titulo, id, data ou status"),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " [Backspace]          ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  Apagar caractere do filtro de busca"),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " [?] ou [F1]          ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  Abrir / fechar esta janela flutuante de ajuda"),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " [Esc]                ",
+                Style::default()
+                    .fg(Color::White)
+                    .bg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  Fechar janela / sair do navegador interativo"),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(" Pressione ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "[?] ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(", ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "[Esc] ",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("ou ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "[Enter] ",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "para fechar esta ajuda",
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]),
+    ];
+
+    let p = Paragraph::new(rows)
+        .block(block)
+        .alignment(ratatui::layout::Alignment::Left)
+        .wrap(Wrap { trim: false });
+    f.render_widget(p, area);
 }
 
 fn centered_rect(

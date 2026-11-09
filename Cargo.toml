@@ -8,6 +8,15 @@ license = "MIT"
 repository = "https://github.com/caiosaboia/agy-brain"
 keywords = ["antigravity", "cli", "tui", "terminal", "productivity"]
 categories = ["command-line-utilities", "development-tools"]
+default-run = "brain"
+
+[[bin]]
+name = "brain"
+path = "src/bin/brain.rs"
+
+[[bin]]
+name = "agy-brain"
+path = "src/bin/agy-brain.rs"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive", "cargo"] }

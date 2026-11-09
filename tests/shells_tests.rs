@@ -9,20 +9,27 @@ use tempfile::tempdir;
 #[test]
 fn test_get_shell_integration() {
     let bash = get_shell_integration("bash").unwrap();
-    assert!(bash.contains("agy-brain() {"));
-    assert!(bash.contains("cd-brain"));
+    assert!(bash.contains("brain() {"));
+    assert!(bash.contains("alias agy-brain=brain"));
+    assert!(bash.contains("alias cd-brain=brain"));
     assert!(bash.contains("--target-file"));
 
     let zsh = get_shell_integration("zsh").unwrap();
-    assert!(zsh.contains("agy-brain() {"));
+    assert!(zsh.contains("brain() {"));
+    assert!(zsh.contains("alias agy-brain=brain"));
+    assert!(zsh.contains("alias cd-brain=brain"));
     assert!(zsh.contains("--target-file"));
 
     let fish = get_shell_integration("fish").unwrap();
-    assert!(fish.contains("function agy-brain"));
+    assert!(fish.contains("function brain"));
+    assert!(fish.contains("alias agy-brain=brain"));
+    assert!(fish.contains("alias cd-brain=brain"));
     assert!(fish.contains("--target-file"));
 
     let pwsh = get_shell_integration("powershell").unwrap();
-    assert!(pwsh.contains("function agy-brain {"));
+    assert!(pwsh.contains("function brain {"));
+    assert!(pwsh.contains("Set-Alias -Name agy-brain -Value brain"));
+    assert!(pwsh.contains("Set-Alias -Name cd-brain -Value brain"));
     assert!(pwsh.contains("--target-file"));
 
     assert!(get_shell_integration("unknown_shell").is_none());

@@ -9,6 +9,10 @@ fn agy_brain_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_agy-brain"))
 }
 
+fn brain_bin() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_brain"))
+}
+
 fn setup_e2e_env() -> (tempfile::TempDir, PathBuf, PathBuf) {
     let tmp = tempdir().unwrap();
     let app_dir = tmp.path().join("agy_home");
@@ -310,4 +314,44 @@ fn test_cli_init_and_doctor() {
     let doc_out = String::from_utf8_lossy(&doc.stdout);
     assert!(doc_out.contains("AGY-BRAIN DOCTOR"));
     assert!(doc_out.contains("Sessoes principais:"));
+}
+
+#[test]
+fn test_cli_brain_and_agy_brain_binaries_parity() {
+    let (_tmp, app_dir, ws_dir) = setup_e2e_env();
+
+    // 1. Both binaries exist and respond to --help with their respective binary names
+    let help_brain = Command::new(brain_bin()).arg("--help").output().unwrap();
+    assert!(help_brain.status.success());
+    let help_brain_out = String::from_utf8_lossy(&help_brain.stdout);
+    assert!(help_brain_out.contains("brain"));
+    assert!(help_brain_out.contains("doctor"));
+    assert!(help_brain_out.contains("list"));
+
+    let help_agy = Command::new(agy_brain_bin())
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert!(help_agy.status.success());
+    let help_agy_out = String::from_utf8_lossy(&help_agy.stdout);
+    assert!(help_agy_out.contains("agy-brain"));
+    assert!(help_agy_out.contains("doctor"));
+    assert!(help_agy_out.contains("list"));
+
+    // 2. Both binaries produce identical list output
+    let list_brain = Command::new(brain_bin())
+        .current_dir(&ws_dir)
+        .args(["--app-dir", app_dir.to_str().unwrap(), "list", "--all"])
+        .output()
+        .unwrap();
+    assert!(list_brain.status.success());
+
+    let list_agy = Command::new(agy_brain_bin())
+        .current_dir(&ws_dir)
+        .args(["--app-dir", app_dir.to_str().unwrap(), "list", "--all"])
+        .output()
+        .unwrap();
+    assert!(list_agy.status.success());
+
+    assert_eq!(list_brain.stdout, list_agy.stdout);
 }

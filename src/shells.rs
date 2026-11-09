@@ -1,27 +1,31 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub const BASH_INTEGRATION: &str = r#"# agy-brain shell integration for Bash
-agy-brain() {
+pub const BASH_INTEGRATION: &str = r#"# brain shell integration for Bash
+brain() {
+  local exe="brain"
+  if ! command -v brain >/dev/null 2>&1 && command -v agy-brain >/dev/null 2>&1; then
+    exe="agy-brain"
+  fi
   if [ "$1" = "go" ]; then
     shift
     local target
-    target="$(command agy-brain resolve "$@")"
+    target="$(command "$exe" resolve "$@")"
     if [ -n "$target" ] && [ -d "$target" ]; then
       cd "$target" || return
       return 0
     fi
   elif [ "$#" -eq 1 ] && [[ "$1" =~ ^[0-9]+$|^[a-f0-9-]{30,}$ ]]; then
     local target
-    target="$(command agy-brain resolve "$1")"
+    target="$(command "$exe" resolve "$1")"
     if [ -n "$target" ] && [ -d "$target" ]; then
       cd "$target" || return
       return 0
     fi
   elif [ "$#" -eq 0 ]; then
     local tmp
-    tmp="$(mktemp 2>/dev/null || mktemp -t agy_brain)"
-    command agy-brain --target-file "$tmp"
+    tmp="$(mktemp 2>/dev/null || mktemp -t brain)"
+    command "$exe" --target-file "$tmp"
     if [ -s "$tmp" ]; then
       local target
       target="$(cat "$tmp")"
@@ -34,33 +38,37 @@ agy-brain() {
     rm -f "$tmp"
     return 0
   fi
-  command agy-brain "$@"
+  command "$exe" "$@"
 }
-alias cd-brain=agy-brain
-alias brain=agy-brain
+alias agy-brain=brain
+alias cd-brain=brain
 "#;
 
-pub const ZSH_INTEGRATION: &str = r#"# agy-brain shell integration for Zsh
-agy-brain() {
+pub const ZSH_INTEGRATION: &str = r#"# brain shell integration for Zsh
+brain() {
+  local exe="brain"
+  if ! command -v brain >/dev/null 2>&1 && command -v agy-brain >/dev/null 2>&1; then
+    exe="agy-brain"
+  fi
   if [ "$1" = "go" ]; then
     shift
     local target
-    target="$(command agy-brain resolve "$@")"
+    target="$(command "$exe" resolve "$@")"
     if [ -n "$target" ] && [ -d "$target" ]; then
       cd "$target" || return
       return 0
     fi
   elif [ "$#" -eq 1 ] && [[ "$1" =~ ^[0-9]+$|^[a-f0-9-]{30,}$ ]]; then
     local target
-    target="$(command agy-brain resolve "$1")"
+    target="$(command "$exe" resolve "$1")"
     if [ -n "$target" ] && [ -d "$target" ]; then
       cd "$target" || return
       return 0
     fi
   elif [ "$#" -eq 0 ]; then
     local tmp
-    tmp="$(mktemp 2>/dev/null || mktemp -t agy_brain)"
-    command agy-brain --target-file "$tmp"
+    tmp="$(mktemp 2>/dev/null || mktemp -t brain)"
+    command "$exe" --target-file "$tmp"
     if [ -s "$tmp" ]; then
       local target
       target="$(cat "$tmp")"
@@ -73,29 +81,33 @@ agy-brain() {
     rm -f "$tmp"
     return 0
   fi
-  command agy-brain "$@"
+  command "$exe" "$@"
 }
-alias cd-brain=agy-brain
-alias brain=agy-brain
+alias agy-brain=brain
+alias cd-brain=brain
 "#;
 
-pub const FISH_INTEGRATION: &str = r#"# agy-brain shell integration for Fish
-function agy-brain --description "Antigravity Brain CLI Navigator"
+pub const FISH_INTEGRATION: &str = r#"# brain shell integration for Fish
+function brain --description "Antigravity Brain CLI Navigator"
+    set -l exe "brain"
+    if not command -v brain >/dev/null 2>&1; and command -v agy-brain >/dev/null 2>&1
+        set exe "agy-brain"
+    end
     if test (count $argv) -eq 1 -a "$argv[1]" = "go"
-        set -l target (command agy-brain resolve)
+        set -l target (command $exe resolve)
         if test -n "$target" -a -d "$target"
             cd "$target"
             return 0
         end
     else if test (count $argv) -eq 2 -a "$argv[1]" = "go"
-        set -l target (command agy-brain resolve "$argv[2]")
+        set -l target (command $exe resolve "$argv[2]")
         if test -n "$target" -a -d "$target"
             cd "$target"
             return 0
         end
     else if test (count $argv) -eq 0
-        set -l tmp (mktemp 2>/dev/null; or mktemp -t agy_brain)
-        command agy-brain --target-file "$tmp"
+        set -l tmp (mktemp 2>/dev/null; or mktemp -t brain)
+        command $exe --target-file "$tmp"
         if test -s "$tmp"
             set -l target (cat "$tmp")
             rm -f "$tmp"
@@ -107,23 +119,23 @@ function agy-brain --description "Antigravity Brain CLI Navigator"
         rm -f "$tmp"
         return 0
     end
-    command agy-brain $argv
+    command $exe $argv
 end
-alias cd-brain=agy-brain
-alias brain=agy-brain
+alias agy-brain=brain
+alias cd-brain=brain
 "#;
 
-pub const POWERSHELL_INTEGRATION: &str = r#"# agy-brain shell integration for PowerShell
-function agy-brain {
+pub const POWERSHELL_INTEGRATION: &str = r#"# brain shell integration for PowerShell
+function brain {
     [CmdletBinding()]
     param(
         [Parameter(ValueFromRemainingArguments = $true)]
         [string[]]$RemainingArgs
     )
 
-    $exe = (Get-Command agy-brain.exe, agy-brain -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source)
+    $exe = (Get-Command brain.exe, brain, agy-brain.exe, agy-brain -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source)
     if (-not $exe) {
-        $exe = "agy-brain.exe"
+        $exe = "brain.exe"
     }
 
     $sub = if ($RemainingArgs -and $RemainingArgs.Count -ge 1) { $RemainingArgs[0] } else { $null }
@@ -168,8 +180,8 @@ function agy-brain {
 
     & $exe @RemainingArgs
 }
-Set-Alias -Name cd-brain -Value agy-brain -ErrorAction SilentlyContinue
-Set-Alias -Name brain -Value agy-brain -ErrorAction SilentlyContinue
+Set-Alias -Name agy-brain -Value brain -ErrorAction SilentlyContinue
+Set-Alias -Name cd-brain -Value brain -ErrorAction SilentlyContinue
 "#;
 
 pub fn get_shell_integration(shell_name: &str) -> Option<&'static str> {
@@ -245,9 +257,9 @@ pub fn install_shell_integration_in_home(
     };
 
     let hook_line = match shell_name.as_str() {
-        "powershell" | "pwsh" => "Invoke-Expression (& agy-brain init powershell | Out-String)",
-        "fish" => "agy-brain init fish | source",
-        _ => "eval \"$(agy-brain init bash)\"",
+        "powershell" | "pwsh" => "Invoke-Expression (& brain init powershell | Out-String)",
+        "fish" => "brain init fish | source",
+        _ => "eval \"$(brain init bash)\"",
     };
 
     if let Some(parent) = rc_file.parent() {
@@ -255,18 +267,21 @@ pub fn install_shell_integration_in_home(
     }
 
     let content = fs::read_to_string(&rc_file).unwrap_or_default();
-    if content.contains("agy-brain init") || content.contains(hook_line) {
+    if content.contains("brain init")
+        || content.contains("agy-brain init")
+        || content.contains(hook_line)
+    {
         return (
             true,
             format!(
-                "Integracao agy-brain ja esta instalada em: {}",
+                "Integracao brain ja esta instalada em: {}",
                 rc_file.display()
             ),
         );
     }
 
     let new_content = format!(
-        "{}\n\n# agy-brain shell hook\n{}\n",
+        "{}\n\n# brain shell hook\n{}\n",
         content.trim_end(),
         hook_line
     );
