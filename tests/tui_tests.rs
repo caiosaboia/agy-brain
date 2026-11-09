@@ -462,3 +462,95 @@ fn test_tui_claude_code_delete_removes_transcript_from_disk() {
     assert!(state.all_sessions.is_empty());
     assert!(!transcript.exists());
 }
+
+#[test]
+fn test_tui_help_modal_toggle_and_render() {
+    let (_tmp, app_dir, ws_dir, _other_ws) = setup_test_db();
+    let sessions = fetch_sessions_ext(Some(&ws_dir), false, false, Some(&app_dir), None);
+    let mut state = AppState::new(
+        ProviderKind::Antigravity,
+        sessions,
+        ws_dir,
+        Some(app_dir),
+        false,
+    );
+
+    let backend = TestBackend::new(120, 35);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    // 1. Initial render verifies footer contains "[?] Ajuda"
+    terminal.draw(|f| render_ui(f, &mut state)).unwrap();
+    let initial_buf = buffer_to_string(&terminal);
+    assert!(
+        initial_buf.contains("[?]"),
+        "Footer must show '[?]' key badge"
+    );
+    assert!(initial_buf.contains("Ajuda"), "Footer must show 'Ajuda'");
+    assert!(!state.show_help, "show_help must be false initially");
+
+    // 2. Press '?' toggles help modal open
+    let action = handle_key_event(
+        &mut state,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+    );
+    assert_eq!(action, None);
+    assert!(state.show_help, "Pressing '?' must set show_help to true");
+
+    terminal.draw(|f| render_ui(f, &mut state)).unwrap();
+    let help_buf = buffer_to_string(&terminal);
+    assert!(
+        help_buf.contains("AJUDA - COMANDOS E ATALHOS DO BRAIN"),
+        "Modal must render help title"
+    );
+    assert!(
+        help_buf.contains("[Enter]"),
+        "Help modal must describe [Enter]"
+    );
+    assert!(
+        help_buf.contains("[Ctrl+E] ou [F2]"),
+        "Help modal must describe Neovim shortcut"
+    );
+    assert!(
+        help_buf.contains("[Ctrl+R]"),
+        "Help modal must describe Rename shortcut"
+    );
+    assert!(
+        help_buf.contains("[Ctrl+P]"),
+        "Help modal must describe Pin shortcut"
+    );
+    assert!(
+        help_buf.contains("[Ctrl+S]"),
+        "Help modal must describe Subagents shortcut"
+    );
+
+    // 3. Press Esc dismisses help modal without exiting TUI
+    let esc_action = handle_key_event(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(esc_action, None, "Esc on help modal must not exit TUI");
+    assert!(!state.show_help, "Esc must set show_help to false");
+
+    // 4. Press F1 toggles help modal open
+    handle_key_event(&mut state, KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE));
+    assert!(state.show_help, "F1 must open help modal");
+
+    // 5. Press Enter dismisses help modal without navigating
+    let enter_action = handle_key_event(
+        &mut state,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+    );
+    assert_eq!(enter_action, None, "Enter on help modal must not navigate");
+    assert!(!state.show_help, "Enter must close help modal");
+
+    // 6. Press Shift+'?' (typing '?' with Shift key) also toggles help
+    handle_key_event(
+        &mut state,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT),
+    );
+    assert!(state.show_help, "Shift+'?' must open help modal");
+
+    // 7. Press 'q' dismisses help modal
+    handle_key_event(
+        &mut state,
+        KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
+    );
+    assert!(!state.show_help, "Pressing 'q' must close help modal");
+}

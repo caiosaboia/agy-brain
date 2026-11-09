@@ -1,4 +1,4 @@
-# PowerShell installation script for agy-brain on Windows
+# PowerShell installation script for brain on Windows
 [CmdletBinding()]
 param (
     [string]$Version = "latest",
@@ -8,9 +8,10 @@ param (
 $ErrorActionPreference = "Stop"
 
 $Repo = "caiosaboia/agy-brain"
-$BinaryName = "agy-brain.exe"
+$BinaryName = "brain.exe"
+$AliasBinary = "agy-brain.exe"
 
-Write-Host "Installing agy-brain..."
+Write-Host "Installing brain..."
 
 if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
@@ -26,7 +27,7 @@ try {
         "https://github.com/$Repo/releases/download/$Version/agy-brain-x86_64-pc-windows-msvc.zip"
     }
 
-    $ZipPath = Join-Path $env:TEMP "agy-brain.zip"
+    $ZipPath = Join-Path $env:TEMP "brain.zip"
     Write-Host "Downloading release from $ReleaseUrl..."
     Invoke-WebRequest -Uri $ReleaseUrl -OutFile $ZipPath -UseBasicParsing
     
@@ -51,6 +52,14 @@ if (-not $Installed) {
 
 # Ensure destination directory is in user PATH if downloaded directly
 $TargetExe = Join-Path $InstallDir $BinaryName
+$AliasExe = Join-Path $InstallDir $AliasBinary
+
+if ((Test-Path $TargetExe) -and (-not (Test-Path $AliasExe))) {
+    Copy-Item -Path $TargetExe -Destination $AliasExe -Force
+} elseif ((Test-Path $AliasExe) -and (-not (Test-Path $TargetExe))) {
+    Copy-Item -Path $AliasExe -Destination $TargetExe -Force
+}
+
 if (Test-Path $TargetExe) {
     $CurrentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
     if ($CurrentPath -split ';' -notcontains $InstallDir) {
@@ -62,7 +71,13 @@ if (Test-Path $TargetExe) {
 
 # Run automated shell hook installation
 Write-Host "Configuring shell hook in PowerShell profile..."
-& agy-brain install powershell
+if (Get-Command brain -ErrorAction SilentlyContinue) {
+    & brain install powershell
+} elseif (Get-Command agy-brain -ErrorAction SilentlyContinue) {
+    & agy-brain install powershell
+} elseif (Test-Path $TargetExe) {
+    & $TargetExe install powershell
+}
 
 Write-Host "Installation completed successfully."
 Write-Host "Run 'brain doctor' or restart your terminal to use 'brain' and 'cd-brain'."

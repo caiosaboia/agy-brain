@@ -1,10 +1,10 @@
-mod backend;
-mod claude_code;
-mod cli;
-mod core;
-mod shells;
-mod tui;
-mod ui;
+pub mod backend;
+pub mod claude_code;
+pub mod cli;
+pub mod core;
+pub mod shells;
+pub mod tui;
+pub mod ui;
 
 use clap::Parser;
 use std::path::{Path, PathBuf};
@@ -19,7 +19,7 @@ use ui::{
     open_in_neovim, render_preview, render_table, CYAN, GREEN, RED, RESET, WHITE, YELLOW,
 };
 
-fn run_doctor(provider: ProviderKind, app_dir: Option<&Path>) {
+pub fn run_doctor(provider: ProviderKind, app_dir: Option<&Path>) {
     let cur_ws = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     println!(
@@ -139,7 +139,7 @@ fn run_doctor(provider: ProviderKind, app_dir: Option<&Path>) {
     println!("\n{CYAN}+------------------------------------------------------------------------+{RESET}\n");
 }
 
-fn main() -> ExitCode {
+pub fn run_app() -> ExitCode {
     let args = Cli::parse();
     let app_dir = args.app_dir.as_deref();
     let cur_ws = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
