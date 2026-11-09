@@ -20,7 +20,7 @@ path = "src/bin/agy-brain.rs"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive", "cargo"] }
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 dirs = "5.0"
