@@ -1,0 +1,9 @@
+[advisories]
+ignore = [
+    # paste is no longer maintained (transitive dependency from ratatui 0.29)
+    "RUSTSEC-2024-0436",
+    # lru IterMut unsoundness warning (transitive dependency from ratatui 0.29)
+    "RUSTSEC-2026-0002",
+    # lru LruCache::pop panic safety warning (transitive dependency from ratatui 0.29)
+    "RUSTSEC-2026-0253",
+]
