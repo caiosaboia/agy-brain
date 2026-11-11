@@ -553,4 +553,85 @@ fn test_tui_help_modal_toggle_and_render() {
         KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
     );
     assert!(!state.show_help, "Pressing 'q' must close help modal");
+
+    // 8. Press Shift+'/' (Ghostty / Kitty keyboard protocol sending base slash key) opens modal
+    handle_key_event(
+        &mut state,
+        KeyEvent::new(KeyCode::Char('/'), KeyModifiers::SHIFT),
+    );
+    assert!(state.show_help, "Shift+'/' must open help modal");
+
+    // 9. Pressing modifier key alone does not dismiss modal
+    handle_key_event(
+        &mut state,
+        KeyEvent::new(
+            KeyCode::Modifier(crossterm::event::ModifierKeyCode::LeftShift),
+            KeyModifiers::SHIFT,
+        ),
+    );
+    assert!(state.show_help, "Modifier key must not dismiss help modal");
+
+    // Dismiss with Space
+    handle_key_event(
+        &mut state,
+        KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
+    );
+    assert!(!state.show_help, "Space must dismiss help modal");
+
+    // 10. AltGr+'w' on Brazilian ABNT2 keyboards opens modal
+    handle_key_event(
+        &mut state,
+        KeyEvent::new(
+            KeyCode::Char('w'),
+            KeyModifiers::CONTROL | KeyModifiers::ALT,
+        ),
+    );
+    assert!(state.show_help, "AltGr+'w' must open help modal");
+
+    // Dismiss with Esc
+    handle_key_event(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(!state.show_help);
+
+    // 11. AltGr+'?' on Windows ConPTY opens modal
+    handle_key_event(
+        &mut state,
+        KeyEvent::new(
+            KeyCode::Char('?'),
+            KeyModifiers::CONTROL | KeyModifiers::ALT,
+        ),
+    );
+    assert!(state.show_help, "AltGr+'?' must open help modal");
+
+    // Dismiss with '?'
+    handle_key_event(
+        &mut state,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+    );
+    assert!(!state.show_help);
+
+    // 12. Ctrl+'h' opens modal
+    handle_key_event(
+        &mut state,
+        KeyEvent::new(KeyCode::Char('h'), KeyModifiers::CONTROL),
+    );
+    assert!(state.show_help, "Ctrl+'h' must open help modal");
+
+    // Dismiss with Enter
+    handle_key_event(
+        &mut state,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+    );
+    assert!(!state.show_help);
+
+    // 13. Enter navigates and ensures brain directory exists
+    let nav_action = handle_key_event(
+        &mut state,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+    );
+    match nav_action {
+        Some(TuiAction::Navigate(p)) => {
+            assert!(p.is_dir(), "Navigated path must exist on disk");
+        }
+        other => panic!("Expected Navigate action, got: {:?}", other),
+    }
 }

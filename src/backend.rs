@@ -133,7 +133,11 @@ pub fn session_root_dir(
     app_dir: Option<&Path>,
 ) -> Option<PathBuf> {
     match provider {
-        ProviderKind::Antigravity => Some(core::get_brain_root(app_dir).join(id)),
+        ProviderKind::Antigravity => {
+            let p = core::get_brain_root(app_dir).join(id);
+            let _ = std::fs::create_dir_all(&p);
+            Some(p)
+        }
         ProviderKind::ClaudeCode => claude_code::resolve_session_root(id, app_dir, workspace_path),
     }
 }

@@ -149,14 +149,18 @@ pub fn handle_key_event(state: &mut AppState, key: event::KeyEvent) -> Option<Tu
     }
 
     if state.show_help {
-        match (key.modifiers, key.code) {
-            (
-                KeyModifiers::NONE,
-                KeyCode::Char('?') | KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q'),
-            )
-            | (KeyModifiers::SHIFT, KeyCode::Char('?'))
-            | (KeyModifiers::NONE, KeyCode::F(1)) => {
+        match key.code {
+            KeyCode::Char('?')
+            | KeyCode::Char('/')
+            | KeyCode::Char('q')
+            | KeyCode::Char(' ')
+            | KeyCode::Esc
+            | KeyCode::Enter
+            | KeyCode::F(1) => {
                 state.show_help = false;
+            }
+            KeyCode::Modifier(_) => {
+                // Do not dismiss help on modifier keys (e.g. pressing Shift alone)
             }
             _ => {
                 state.show_help = false;
@@ -272,7 +276,9 @@ pub fn handle_key_event(state: &mut AppState, key: event::KeyEvent) -> Option<Tu
         (KeyModifiers::NONE, KeyCode::Esc) | (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
             return Some(TuiAction::Exit);
         }
-        (KeyModifiers::NONE, KeyCode::Enter) => {
+        (m, KeyCode::Enter)
+            if !m.contains(KeyModifiers::CONTROL) && !m.contains(KeyModifiers::ALT) =>
+        {
             if let Some(session) = state.selected_session() {
                 if let Some(brain_path) = backend::session_root_dir(
                     state.provider,
@@ -368,8 +374,15 @@ pub fn handle_key_event(state: &mut AppState, key: event::KeyEvent) -> Option<Tu
         (KeyModifiers::NONE, KeyCode::Down) => {
             state.next();
         }
-        (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char('?'))
-        | (KeyModifiers::NONE, KeyCode::F(1)) => {
+        (_, KeyCode::Char('?'))
+        | (KeyModifiers::SHIFT, KeyCode::Char('/'))
+        | (_, KeyCode::F(1))
+        | (KeyModifiers::CONTROL, KeyCode::Char('h')) => {
+            state.show_help = true;
+        }
+        (m, KeyCode::Char('w') | KeyCode::Char('W'))
+            if m.contains(KeyModifiers::CONTROL) && m.contains(KeyModifiers::ALT) =>
+        {
             state.show_help = true;
         }
         (KeyModifiers::NONE, KeyCode::Backspace) => {
