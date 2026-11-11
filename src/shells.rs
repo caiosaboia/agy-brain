@@ -11,26 +11,34 @@ brain() {
     shift
     local target
     target="$(command "$exe" resolve "$@")"
-    if [ -n "$target" ] && [ -d "$target" ]; then
+    if [ -n "$target" ]; then
+      mkdir -p "$target"
       cd "$target" || return
       return 0
     fi
   elif [ "$#" -eq 1 ] && [[ "$1" =~ ^[0-9]+$|^[a-f0-9-]{30,}$ ]]; then
     local target
     target="$(command "$exe" resolve "$1")"
-    if [ -n "$target" ] && [ -d "$target" ]; then
+    if [ -n "$target" ]; then
+      mkdir -p "$target"
       cd "$target" || return
       return 0
     fi
-  elif [ "$#" -eq 0 ]; then
+  elif [ "$#" -eq 0 ] || [ "$1" = "tui" ] || [[ "$1" == -* ]]; then
     local tmp
     tmp="$(mktemp 2>/dev/null || mktemp -t brain)"
-    command "$exe" --target-file "$tmp"
+    if [ "$1" = "tui" ]; then
+      shift
+      command "$exe" --target-file "$tmp" "$@"
+    else
+      command "$exe" --target-file "$tmp" "$@"
+    fi
     if [ -s "$tmp" ]; then
       local target
       target="$(cat "$tmp")"
       rm -f "$tmp"
-      if [ -n "$target" ] && [ -d "$target" ]; then
+      if [ -n "$target" ]; then
+        mkdir -p "$target"
         cd "$target" || return
         return 0
       fi
@@ -54,26 +62,34 @@ brain() {
     shift
     local target
     target="$(command "$exe" resolve "$@")"
-    if [ -n "$target" ] && [ -d "$target" ]; then
+    if [ -n "$target" ]; then
+      mkdir -p "$target"
       cd "$target" || return
       return 0
     fi
   elif [ "$#" -eq 1 ] && [[ "$1" =~ ^[0-9]+$|^[a-f0-9-]{30,}$ ]]; then
     local target
     target="$(command "$exe" resolve "$1")"
-    if [ -n "$target" ] && [ -d "$target" ]; then
+    if [ -n "$target" ]; then
+      mkdir -p "$target"
       cd "$target" || return
       return 0
     fi
-  elif [ "$#" -eq 0 ]; then
+  elif [ "$#" -eq 0 ] || [ "$1" = "tui" ] || [[ "$1" == -* ]]; then
     local tmp
     tmp="$(mktemp 2>/dev/null || mktemp -t brain)"
-    command "$exe" --target-file "$tmp"
+    if [ "$1" = "tui" ]; then
+      shift
+      command "$exe" --target-file "$tmp" "$@"
+    else
+      command "$exe" --target-file "$tmp" "$@"
+    fi
     if [ -s "$tmp" ]; then
       local target
       target="$(cat "$tmp")"
       rm -f "$tmp"
-      if [ -n "$target" ] && [ -d "$target" ]; then
+      if [ -n "$target" ]; then
+        mkdir -p "$target"
         cd "$target" || return
         return 0
       fi
@@ -93,25 +109,32 @@ function brain --description "Antigravity Brain CLI Navigator"
     if not command -v brain >/dev/null 2>&1; and command -v agy-brain >/dev/null 2>&1
         set exe "agy-brain"
     end
-    if test (count $argv) -eq 1 -a "$argv[1]" = "go"
-        set -l target (command $exe resolve)
-        if test -n "$target" -a -d "$target"
+    if test (count $argv) -ge 1 -a "$argv[1]" = "go"
+        set -l target (command $exe resolve $argv[2..-1])
+        if test -n "$target"
+            mkdir -p "$target"
             cd "$target"
             return 0
         end
-    else if test (count $argv) -eq 2 -a "$argv[1]" = "go"
-        set -l target (command $exe resolve "$argv[2]")
-        if test -n "$target" -a -d "$target"
+    else if test (count $argv) -eq 1; and string match -qr '^[0-9]+$|^[a-f0-9-]{30,}$' "$argv[1]"
+        set -l target (command $exe resolve "$argv[1]")
+        if test -n "$target"
+            mkdir -p "$target"
             cd "$target"
             return 0
         end
-    else if test (count $argv) -eq 0
+    else if test (count $argv) -eq 0; or test "$argv[1]" = "tui"; or string match -qr '^-' "$argv[1]"
         set -l tmp (mktemp 2>/dev/null; or mktemp -t brain)
-        command $exe --target-file "$tmp"
+        if test (count $argv) -gt 0 -a "$argv[1]" = "tui"
+            command $exe --target-file "$tmp" $argv[2..-1]
+        else
+            command $exe --target-file "$tmp" $argv
+        end
         if test -s "$tmp"
             set -l target (cat "$tmp")
             rm -f "$tmp"
-            if test -n "$target" -a -d "$target"
+            if test -n "$target"
+                mkdir -p "$target"
                 cd "$target"
                 return 0
             end
@@ -126,7 +149,7 @@ alias cd-brain=brain
 "#;
 
 pub const POWERSHELL_INTEGRATION: &str = r#"# brain shell integration for PowerShell
-function brain {
+function global:brain {
     [CmdletBinding()]
     param(
         [Parameter(ValueFromRemainingArguments = $true)]
@@ -143,32 +166,59 @@ function brain {
 
     if ($sub -eq "go") {
         $target = (& $exe resolve $arg1)
-        if ($target -and (Test-Path $target)) {
-            Set-Location $target
-            Write-Host "[OK] Cerebro Antigravity ($target)" -ForegroundColor Green
-            return
+        if ($target) {
+            $target = $target.Trim()
+            if ($target) {
+                if (-not (Test-Path $target)) {
+                    New-Item -ItemType Directory -Path $target -Force | Out-Null
+                }
+                Set-Location $target
+                Write-Host "[OK] Cerebro ($target)" -ForegroundColor Green
+                return
+            }
         }
     }
 
     if ($sub -and ($sub -match '^[0-9]+$' -or ($sub.Length -ge 30 -and $sub -match '-'))) {
         $target = (& $exe resolve $sub)
-        if ($target -and (Test-Path $target)) {
-            Set-Location $target
-            Write-Host "[OK] Cerebro Antigravity ($target)" -ForegroundColor Green
-            return
+        if ($target) {
+            $target = $target.Trim()
+            if ($target) {
+                if (-not (Test-Path $target)) {
+                    New-Item -ItemType Directory -Path $target -Force | Out-Null
+                }
+                Set-Location $target
+                Write-Host "[OK] Cerebro ($target)" -ForegroundColor Green
+                return
+            }
         }
     }
 
-    if (-not $sub) {
+    if (-not $sub -or $sub -eq "tui" -or $sub.StartsWith("-")) {
         $tmp = [System.IO.Path]::GetTempFileName()
         try {
-            & $exe --target-file $tmp
+            $tuiArgs = @()
+            if ($sub -eq "tui") {
+                if ($RemainingArgs.Count -gt 1) {
+                    $tuiArgs = $RemainingArgs[1..($RemainingArgs.Count - 1)]
+                }
+            } else {
+                $tuiArgs = $RemainingArgs
+            }
+            if ($tuiArgs -and $tuiArgs.Count -gt 0) {
+                & $exe --target-file $tmp @tuiArgs
+            } else {
+                & $exe --target-file $tmp
+            }
             if (Test-Path $tmp) {
                 $target = (Get-Content -Path $tmp -Raw -ErrorAction SilentlyContinue)
                 if ($target) { $target = $target.Trim() }
-                if ($target -and (Test-Path $target)) {
+                if ($target) {
+                    if (-not (Test-Path $target)) {
+                        New-Item -ItemType Directory -Path $target -Force | Out-Null
+                    }
                     Set-Location $target
-                    Write-Host "[OK] Cerebro Antigravity ($target)" -ForegroundColor Green
+                    Write-Host "[OK] Cerebro ($target)" -ForegroundColor Green
                     return
                 }
             }
@@ -180,8 +230,8 @@ function brain {
 
     & $exe @RemainingArgs
 }
-Set-Alias -Name agy-brain -Value brain -ErrorAction SilentlyContinue
-Set-Alias -Name cd-brain -Value brain -ErrorAction SilentlyContinue
+Set-Alias -Name agy-brain -Value brain -Scope Global -Option AllScope -Force -ErrorAction SilentlyContinue
+Set-Alias -Name cd-brain -Value brain -Scope Global -Option AllScope -Force -ErrorAction SilentlyContinue
 "#;
 
 pub fn get_shell_integration(shell_name: &str) -> Option<&'static str> {

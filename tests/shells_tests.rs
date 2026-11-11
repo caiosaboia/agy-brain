@@ -27,9 +27,9 @@ fn test_get_shell_integration() {
     assert!(fish.contains("--target-file"));
 
     let pwsh = get_shell_integration("powershell").unwrap();
-    assert!(pwsh.contains("function brain {"));
-    assert!(pwsh.contains("Set-Alias -Name agy-brain -Value brain"));
-    assert!(pwsh.contains("Set-Alias -Name cd-brain -Value brain"));
+    assert!(pwsh.contains("function global:brain {"));
+    assert!(pwsh.contains("Set-Alias -Name agy-brain -Value brain -Scope Global"));
+    assert!(pwsh.contains("Set-Alias -Name cd-brain -Value brain -Scope Global"));
     assert!(pwsh.contains("--target-file"));
 
     assert!(get_shell_integration("unknown_shell").is_none());
