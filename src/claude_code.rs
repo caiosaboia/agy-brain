@@ -87,20 +87,36 @@ fn extract_text_content(message: &serde_json::Value) -> Option<String> {
     None
 }
 
-struct ParsedFile {
-    summary_title: Option<String>,
-    first_user_text: Option<String>,
-    steps: i64,
-    last_root_timestamp: Option<String>,
-    last_root_type: Option<String>,
-    cwd: Option<String>,
-    subagent_count: usize,
+pub struct ParsedFile {
+    pub summary_title: Option<String>,
+    pub first_user_text: Option<String>,
+    pub steps: i64,
+    pub last_root_timestamp: Option<String>,
+    pub last_root_type: Option<String>,
+    pub cwd: Option<String>,
+    pub subagent_count: usize,
+    pub plan_slugs: Vec<String>,
+}
+
+pub fn get_plans_root(app_dir: Option<&Path>) -> PathBuf {
+    if let Some(dir) = app_dir {
+        return dir.join("plans");
+    }
+    if let Ok(dir) = std::env::var("CLAUDE_APP_DIR") {
+        let p = PathBuf::from(dir);
+        if p.is_dir() {
+            return p.join("plans");
+        }
+    }
+    dirs::home_dir()
+        .map(|h| h.join(".claude").join("plans"))
+        .unwrap_or_else(|| PathBuf::from(".claude").join("plans"))
 }
 
 /// Parses a single Claude Code session transcript (JSONL). Malformed lines
 /// are skipped individually; they never abort parsing of the rest of the
 /// file, since the format can drift across Claude Code versions.
-fn parse_session_file(path: &Path) -> ParsedFile {
+pub fn parse_session_file(path: &Path) -> ParsedFile {
     let mut out = ParsedFile {
         summary_title: None,
         first_user_text: None,
@@ -109,6 +125,7 @@ fn parse_session_file(path: &Path) -> ParsedFile {
         last_root_type: None,
         cwd: None,
         subagent_count: 0,
+        plan_slugs: Vec::new(),
     };
 
     let file = match fs::File::open(path) {
@@ -133,6 +150,21 @@ fn parse_session_file(path: &Path) -> ParsedFile {
             if let Some(c) = value.get("cwd").and_then(|v| v.as_str()) {
                 if !c.trim().is_empty() {
                     out.cwd = Some(c.to_string());
+                }
+            }
+        }
+
+        // Detect plan references or slugs in transcript entries
+        if let Some(slug) = value.get("slug").and_then(|v| v.as_str()) {
+            let s = slug.trim();
+            if !s.is_empty() && !out.plan_slugs.iter().any(|existing| existing == s) {
+                out.plan_slugs.push(s.to_string());
+            }
+        }
+        if trimmed.contains(".claude") && trimmed.contains("plans") {
+            for part in trimmed.split(&['"', '\'', ' ', '\\', '/'][..]) {
+                if part.ends_with(".md") && !out.plan_slugs.iter().any(|existing| existing == part) {
+                    out.plan_slugs.push(part.to_string());
                 }
             }
         }
@@ -251,7 +283,7 @@ fn resolve_claude_title(
     ("(sem titulo)".to_string(), "empty".to_string())
 }
 
-fn find_session_file(id: &str, app_dir: Option<&Path>) -> Option<PathBuf> {
+pub fn find_session_file(id: &str, app_dir: Option<&Path>) -> Option<PathBuf> {
     let root = get_projects_root(app_dir);
     let entries = fs::read_dir(&root).ok()?;
     for e in entries.flatten() {
