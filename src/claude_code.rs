@@ -163,7 +163,8 @@ pub fn parse_session_file(path: &Path) -> ParsedFile {
         }
         if trimmed.contains(".claude") && trimmed.contains("plans") {
             for part in trimmed.split(&['"', '\'', ' ', '\\', '/'][..]) {
-                if part.ends_with(".md") && !out.plan_slugs.iter().any(|existing| existing == part) {
+                if part.ends_with(".md") && !out.plan_slugs.iter().any(|existing| existing == part)
+                {
                     out.plan_slugs.push(part.to_string());
                 }
             }

@@ -91,10 +91,8 @@ fn parse_file_uri(uri: &str) -> Option<PathBuf> {
         {
             Some(PathBuf::from(format!("/{}", stripped)))
         }
-    } else if let Some(stripped) = uri.strip_prefix("file://") {
-        Some(PathBuf::from(stripped))
     } else {
-        None
+        uri.strip_prefix("file://").map(PathBuf::from)
     }
 }
 
@@ -110,11 +108,19 @@ pub fn find_plans_for_antigravity_session(
     let mut candidate_brain_dirs = vec![core::get_brain_root(app_dir).join(session_id)];
     if app_dir.is_none() {
         if let Some(home) = dirs::home_dir() {
-            let alt_ide = home.join(".gemini").join("antigravity").join("brain").join(session_id);
+            let alt_ide = home
+                .join(".gemini")
+                .join("antigravity")
+                .join("brain")
+                .join(session_id);
             if !candidate_brain_dirs.contains(&alt_ide) {
                 candidate_brain_dirs.push(alt_ide);
             }
-            let alt_cli = home.join(".gemini").join("antigravity-cli").join("brain").join(session_id);
+            let alt_cli = home
+                .join(".gemini")
+                .join("antigravity-cli")
+                .join("brain")
+                .join(session_id);
             if !candidate_brain_dirs.contains(&alt_cli) {
                 candidate_brain_dirs.push(alt_cli);
             }
@@ -127,7 +133,13 @@ pub fn find_plans_for_antigravity_session(
 
             let scratch_dir = b_dir.join("scratch");
             if scratch_dir.is_dir() {
-                scan_dir_for_plans(&scratch_dir, session_id, "antigravity", &mut plans, &mut seen);
+                scan_dir_for_plans(
+                    &scratch_dir,
+                    session_id,
+                    "antigravity",
+                    &mut plans,
+                    &mut seen,
+                );
             }
         }
     }
@@ -171,10 +183,7 @@ pub fn find_plans_for_antigravity_session(
     plans
 }
 
-pub fn find_plans_for_claude_session(
-    session_id: &str,
-    app_dir: Option<&Path>,
-) -> Vec<PlanItem> {
+pub fn find_plans_for_claude_session(session_id: &str, app_dir: Option<&Path>) -> Vec<PlanItem> {
     let mut plans = Vec::new();
     let mut seen = HashSet::new();
 
@@ -191,16 +200,19 @@ pub fn find_plans_for_claude_session(
 
             let dot_claude_plans = cwd.join(".claude").join("plans");
             if dot_claude_plans.is_dir() {
-                scan_dir_for_plans(&dot_claude_plans, session_id, "claude-code", &mut plans, &mut seen);
+                scan_dir_for_plans(
+                    &dot_claude_plans,
+                    session_id,
+                    "claude-code",
+                    &mut plans,
+                    &mut seen,
+                );
             }
         }
 
         // 2. Specific slugs referenced in transcript
         for slug in &parsed.plan_slugs {
-            let candidates = [
-                plans_root.join(slug),
-                plans_root.join(format!("{slug}.md")),
-            ];
+            let candidates = [plans_root.join(slug), plans_root.join(format!("{slug}.md"))];
             for cand in candidates {
                 if cand.is_file() {
                     let canon = canonical_or_normalized(&cand);
@@ -313,6 +325,7 @@ pub fn find_all_plans(
     all_plans
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn handle_plan_command(
     provider: ProviderKind,
     target: Option<&str>,
@@ -337,7 +350,7 @@ pub fn handle_plan_command(
             let path_cand = PathBuf::from(t);
             if path_cand.is_dir() {
                 scan_dir_for_plans(&path_cand, "", provider.label(), &mut direct, &mut seen);
-            } else if path_cand.is_file() && is_plan_filename(&t) {
+            } else if path_cand.is_file() && is_plan_filename(t) {
                 let size = path_cand.metadata().map(|m| m.len()).unwrap_or(0);
                 direct.push(PlanItem {
                     path: path_cand.clone(),
@@ -408,7 +421,10 @@ pub fn handle_plan_command(
             } else {
                 String::new()
             };
-            println!("  * {:<36} ({kb}) [{}]{s_tag}", item.filename, item.provider);
+            println!(
+                "  * {:<36} ({kb}) [{}]{s_tag}",
+                item.filename, item.provider
+            );
             println!("    Caminho: {}", item.path.display());
         }
         println!("+------------------------------------------------------------------------+\n");
@@ -434,8 +450,6 @@ pub fn render_artifacts_custom(
             }
             let full_path = if art.category == "transcript" {
                 st.path.clone()
-            } else if art.name.starts_with("scratch/") {
-                brain_path.join(&art.name)
             } else {
                 brain_path.join(&art.name)
             };
@@ -453,8 +467,18 @@ pub fn render_artifacts_custom(
     if files.is_empty() {
         let mut candidate_paths = vec![brain_path.to_path_buf()];
         if let Some(home) = dirs::home_dir() {
-            candidate_paths.push(home.join(".gemini").join("antigravity").join("brain").join(brain_id));
-            candidate_paths.push(home.join(".gemini").join("antigravity-cli").join("brain").join(brain_id));
+            candidate_paths.push(
+                home.join(".gemini")
+                    .join("antigravity")
+                    .join("brain")
+                    .join(brain_id),
+            );
+            candidate_paths.push(
+                home.join(".gemini")
+                    .join("antigravity-cli")
+                    .join("brain")
+                    .join(brain_id),
+            );
         }
         for cand in candidate_paths {
             if cand.is_dir() {

@@ -99,10 +99,18 @@ pub enum Commands {
         #[arg(help = "Brain index or UUID (optional, defaults to current session)")]
         target: Option<String>,
 
-        #[arg(short, long, help = "Find all plan artifacts across the current workspace or globally")]
+        #[arg(
+            short,
+            long,
+            help = "Find all plan artifacts across the current workspace or globally"
+        )]
         all: bool,
 
-        #[arg(short, long, help = "Output the contents of the plan directly to stdout")]
+        #[arg(
+            short,
+            long,
+            help = "Output the contents of the plan directly to stdout"
+        )]
         cat: bool,
     },
 

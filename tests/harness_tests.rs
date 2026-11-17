@@ -55,7 +55,11 @@ fn setup_antigravity_env() -> (tempfile::TempDir, PathBuf, PathBuf) {
         .join("brain")
         .join("11111111-1111-1111-1111-111111111111");
     fs::create_dir_all(&brain_dir).unwrap();
-    fs::write(brain_dir.join("test_plan.md"), "# Antigravity Plan\nContent here.").unwrap();
+    fs::write(
+        brain_dir.join("test_plan.md"),
+        "# Antigravity Plan\nContent here.",
+    )
+    .unwrap();
     fs::write(brain_dir.join("other_artifact.txt"), "not a plan").unwrap();
     fs::write(brain_dir.join("image.png"), b"\x89PNG").unwrap();
 
@@ -154,7 +158,12 @@ fn test_harness_artifacts_plan_filter() {
         .arg("--app-dir")
         .arg(&app_dir)
         .current_dir(&ws_dir)
-        .args(["artifacts", "11111111-1111-1111-1111-111111111111", "--plan", "--paths"])
+        .args([
+            "artifacts",
+            "11111111-1111-1111-1111-111111111111",
+            "--plan",
+            "--paths",
+        ])
         .output()
         .unwrap();
 
