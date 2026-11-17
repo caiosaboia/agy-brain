@@ -47,6 +47,20 @@ pub struct Cli {
     )]
     pub subagents: bool,
 
+    #[arg(
+        long,
+        global = true,
+        help = "Output structured JSON for AI harnesses and scripts"
+    )]
+    pub json: bool,
+
+    #[arg(
+        long,
+        global = true,
+        help = "Output raw newline-delimited paths without formatting"
+    )]
+    pub paths: bool,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }
@@ -75,6 +89,21 @@ pub enum Commands {
     Artifacts {
         #[arg(help = "Brain index or UUID")]
         target: Option<String>,
+
+        #[arg(short, long, help = "Filter only planning artifacts (*plan*.md)")]
+        plan: bool,
+    },
+
+    #[command(about = "Quickly locate or print plan artifacts for AI harnesses", aliases = ["p"])]
+    Plan {
+        #[arg(help = "Brain index or UUID (optional, defaults to current session)")]
+        target: Option<String>,
+
+        #[arg(short, long, help = "Find all plan artifacts across the current workspace or globally")]
+        all: bool,
+
+        #[arg(short, long, help = "Output the contents of the plan directly to stdout")]
+        cat: bool,
     },
 
     #[command(about = "Open brain folder in OS file manager")]

@@ -2,6 +2,7 @@ pub mod backend;
 pub mod claude_code;
 pub mod cli;
 pub mod core;
+pub mod harness;
 pub mod shells;
 pub mod tui;
 pub mod ui;
@@ -201,7 +202,18 @@ pub fn run_app() -> ExitCode {
         Some(Commands::List { all }) => {
             let sessions =
                 backend::fetch_sessions_ext(provider, Some(&cur_ws), all, args.subagents, app_dir);
-            render_table(&sessions);
+            if args.json || args.paths {
+                harness::render_sessions_custom(
+                    &sessions,
+                    args.paths,
+                    args.json,
+                    provider,
+                    Some(&cur_ws),
+                    app_dir,
+                );
+            } else {
+                render_table(&sessions);
+            }
             ExitCode::SUCCESS
         }
 
@@ -222,7 +234,11 @@ pub fn run_app() -> ExitCode {
                 backend::fetch_sessions_ext(provider, Some(&cur_ws), true, true, app_dir);
             let session = sessions.iter().find(|s| s.id == bid);
             let stats = backend::get_brain_stats(provider, &bid, app_dir);
-            render_preview(session, stats.as_ref(), &bid);
+            if args.json || args.paths {
+                harness::render_info_custom(session, stats.as_ref(), &bid, args.paths, args.json);
+            } else {
+                render_preview(session, stats.as_ref(), &bid);
+            }
             ExitCode::SUCCESS
         }
 
@@ -272,7 +288,7 @@ pub fn run_app() -> ExitCode {
             }
         }
 
-        Some(Commands::Artifacts { target }) => {
+        Some(Commands::Artifacts { target, plan }) => {
             let bid = match backend::resolve_brain_target(
                 provider,
                 target.as_deref(),
@@ -286,11 +302,45 @@ pub fn run_app() -> ExitCode {
                 }
             };
             let stats = backend::get_brain_stats(provider, &bid, app_dir);
-            match provider {
-                ProviderKind::Antigravity => list_artifacts(&bid, stats.as_ref()),
-                ProviderKind::ClaudeCode => list_artifacts_from_stats(&bid, stats.as_ref()),
+            let brain_path = backend::session_root_dir(provider, &bid, Some(&cur_ws), app_dir)
+                .unwrap_or_else(|| PathBuf::from(&bid));
+
+            if args.json || args.paths || plan {
+                harness::render_artifacts_custom(
+                    &bid,
+                    &brain_path,
+                    stats.as_ref(),
+                    args.paths,
+                    args.json,
+                    plan,
+                );
+            } else {
+                match provider {
+                    ProviderKind::Antigravity => list_artifacts(&bid, stats.as_ref()),
+                    ProviderKind::ClaudeCode => list_artifacts_from_stats(&bid, stats.as_ref()),
+                }
             }
             ExitCode::SUCCESS
+        }
+
+        Some(Commands::Plan { target, all, cat }) => {
+            match harness::handle_plan_command(
+                provider,
+                target.as_deref(),
+                all,
+                cat,
+                args.paths,
+                args.json,
+                Some(&cur_ws),
+                app_dir,
+                args.subagents,
+            ) {
+                Ok(_) => ExitCode::SUCCESS,
+                Err(err) => {
+                    eprintln!("{RED}[!] Erro ao executar brain plan: {err}{RESET}");
+                    ExitCode::FAILURE
+                }
+            }
         }
 
         Some(Commands::Open { target }) => {
