@@ -257,12 +257,12 @@ O `agy-brain` foi projetado tanto para desenvolvedores humanos quanto como um in
 
 ### Resumo Executivo de Desempenho
 
-| Harness de IA | Descoberta Recomendada | Turnos | Overhead de Contexto | Escala (N = 1.000) | Acurácia (F1) |
-|---|---|:---:|:---:|:---:|:---:|
-| **Google Antigravity CLI** (`agy.exe`) | `brain plan --paths` | 1 | ~272 tokens (0 ANSI) | 79.4 ms (tokens constantes) | **1.00** |
-| **Claude Code CLI** (`claude`) | `brain plan --paths` | 1 | ~233 tokens (0 ANSI) | 87.3 ms (tokens constantes) | **1.00** |
+| Harness de IA | Comando Recomendado | Turnos | Tokens com `brain` | Tokens sem `brain` (N = 50 / 250 / 1.000) | Redução de Tokens (N = 1.000) | Acurácia (F1) |
+|---|---|:---:|:---:|:---:|:---:|:---:|
+| **Google Antigravity CLI** (`agy.exe`) | `brain plan --paths` | 1 | **~272 tokens** | 2.226 / 10.957 / **43.923 tokens** | **-99.4%** | **1.00** (vs 0.01) |
+| **Claude Code CLI** (`claude`) | `brain plan --paths` | 1 | **~233 tokens** | 495 / 2.175 / **8.509 tokens** | **-97.3%** | **1.00** (vs 0.02) |
 
-*Em comparação, varreduras recursivas desordenadas no sistema de arquivos (`find` / `glob`) degradam severamente em escala, consumindo até **43.923 tokens** e reduzindo a acurácia de descoberta para **F1 0.01** em 1.000 sessões devido ao ruído de contexto e truncamento de prompt.*
+*Sem o `agy-brain`, varreduras recursivas desordenadas no sistema de arquivos (`find` / `glob`) sofrem de explosão de contexto à medida que o histórico de sessões cresce, consumindo até **43.923 tokens** por prompt e reduzindo a acurácia de descoberta para **F1 0.01** devido ao ruído de contexto e truncamento. Com o `agy-brain`, o consumo de tokens permanece previsível e constante (~270 tokens), independentemente do tamanho do workspace.*
 
 As métricas empíricas são validadas continuamente através de um executor em micro-sandboxes End-to-End (E2E) reais e de uma suíte de simulação assintótica. Para detalhes completos de arquitetura, metodologia de benchmark e comandos de reprodução, consulte a [Documentação dos Benchmarks](benchmarks/README.md).
 

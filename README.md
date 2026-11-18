@@ -257,12 +257,12 @@ agy-brain tui
 
 ### Executive Performance Summary
 
-| AI Harness | Recommended Discovery | Turns | Context Overhead | Scaling (N = 1,000) | Accuracy (F1) |
-|---|---|:---:|:---:|:---:|:---:|
-| **Google Antigravity CLI** (`agy.exe`) | `brain plan --paths` | 1 | ~272 tokens (0 ANSI) | 79.4 ms (constant tokens) | **1.00** |
-| **Claude Code CLI** (`claude`) | `brain plan --paths` | 1 | ~233 tokens (0 ANSI) | 87.3 ms (constant tokens) | **1.00** |
+| AI Harness | Discovery Command | Turns | Tokens with `brain` | Tokens without `brain` (N = 50 / 250 / 1,000) | Token Savings (N = 1,000) | Accuracy (F1) |
+|---|---|:---:|:---:|:---:|:---:|:---:|
+| **Google Antigravity CLI** (`agy.exe`) | `brain plan --paths` | 1 | **~272 tokens** | 2,226 / 10,957 / **43,923 tokens** | **-99.4%** | **1.00** (vs 0.01) |
+| **Claude Code CLI** (`claude`) | `brain plan --paths` | 1 | **~233 tokens** | 495 / 2,175 / **8,509 tokens** | **-97.3%** | **1.00** (vs 0.02) |
 
-*In comparison, unassisted recursive filesystem scans (`find` / `glob`) degrade severely at scale, consuming up to **43,923 tokens** and dropping discovery accuracy to **F1 0.01** at 1,000 sessions due to context noise and prompt truncation.*
+*Without `agy-brain`, unassisted recursive filesystem scans (`find` / `glob`) suffer from severe context explosion as session history grows, consuming up to **43,923 tokens** per prompt and collapsing discovery accuracy to **F1 0.01** due to context noise and truncation. With `agy-brain`, token usage remains predictable and constant (~270 tokens) regardless of workspace size.*
 
 Empirical metrics are continuously validated through an isolated End-to-End (E2E) sandbox runner and an asymptotic scaling suite. For in-depth architecture details, benchmark methodology, and reproduction steps, see the [Benchmarks Documentation](benchmarks/README.md).
 
